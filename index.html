@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Segment Prompt Tester — Loyoly v0.5</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --blue-primary: #2965fe;
+      --blue-light: #eef4ff;
+      --blue-border: #1c4bf4;
+      --text-primary: #404040;
+      --text-secondary: #737373;
+      --text-muted: #a3a3a3;
+      --text-data: #525252;
+      --red-delete: #ef4444;
+      --bg-page: #f0f0f0;
+      --bg-section: #fafafa;
+      --bg-card: #ffffff;
+      --bg-tab-inactive: #f5f5f5;
+      --bg-tag-data: #f5f5f5;
+      --border-default: #e5e5e5;
+      --border-card: #eaeaea;
+      --border-tag-data: #737373;
+      --radius-modal: 16px;
+      --radius-card: 16px;
+      --radius-input: 8px;
+      --radius-tag: 8px;
+      --padding-modal: 32px;
+      --padding-section: 16px;
+      --font: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font); background: var(--bg-page); color: var(--text-primary); min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; }
+    /* Modal container */
+    .modal { background: var(--bg-card); border-radius: var(--radius-modal); max-width: 680px; width: 100%; box-shadow: 0 8px 40px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.06); }
+    .modal-header { padding: var(--padding-modal); padding-bottom: 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-default); }
+    .modal-header h1 { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+    .modal-close { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border: none; background: none; cursor: pointer; padding: 6px; border-radius: 4px; color: var(--text-muted); }
+    .modal-close:hover { background: var(--bg-tab-inactive); }
+    .modal-close svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 2; }
+    .modal-body { padding: var(--padding-modal); padding-top: 12px; padding-bottom: 12px; display: flex; flex-direction: column; gap: 20px; }
+    .modal-footer { padding: var(--padding-modal); padding-top: 24px; display: flex; gap: 16px; border-top: 1px solid var(--border-default); }
+    /* Text field */
+    .field-label { font-size: 13px; font-weight: 500; color: var(--text-primary); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+    .field-input { width: 100%; border: 1px solid var(--border-default); border-radius: var(--radius-input); padding: 8px 12px; font-size: 13px; font-family: var(--font); color: var(--text-primary); background: var(--bg-card); outline: none; transition: border-color 0.15s; }
+    .field-input:focus { border-color: var(--blue-primary); }
+    .field-input::placeholder { color: var(--text-muted); }
+    .field-help { font-size: 11px; color: var(--text-muted); margin-top: 4px; display: flex; justify-content: space-between; }
+    /* Mode chips */
+    .mode-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .mode-label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .mode-chip { padding: 4px 12px; border-radius: var(--radius-tag); font-size: 12px; font-weight: 500; border: 1px solid var(--border-default); background: var(--bg-card); color: var(--text-secondary); cursor: pointer; transition: all 0.15s; font-family: var(--font); }
+    .mode-chip:hover { border-color: var(--blue-primary); color: var(--blue-primary); }
+    .mode-chip.active { background: var(--blue-primary); color: white; border-color: var(--blue-primary); }
+    /* API key */
+    .api-bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-input); }
+    .api-bar label { font-size: 11px; font-weight: 500; color: #92400e; white-space: nowrap; }
+    .api-bar input { flex: 1; border: 1px solid #fde68a; border-radius: 6px; padding: 4px 8px; font-size: 11px; font-family: 'JetBrains Mono', monospace; background: white; outline: none; }
+    .api-bar input:focus { border-color: #f59e0b; }
+    .api-bar span { font-size: 10px; color: #d97706; white-space: nowrap; }
+    /* Filter section */
+    .filter-section { background: var(--bg-section); border: 1px solid var(--border-default); border-radius: var(--radius-card); padding: var(--padding-section); display: flex; flex-direction: column; gap: 16px; }
+    .filter-header { display: flex; align-items: flex-start; gap: 12px; }
+    .filter-icon { width: 36px; height: 36px; border-radius: 50%; background: var(--bg-tab-inactive); border: 1px solid var(--border-default); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .filter-icon svg { width: 16px; height: 16px; stroke: var(--text-secondary); fill: none; stroke-width: 1.5; }
+    .filter-header-text h2 { font-size: 14px; font-weight: 500; color: var(--text-primary); }
+    .filter-header-text p { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+    /* Rule card */
+    .rule-card { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: var(--radius-card); padding: var(--padding-section); display: flex; flex-direction: column; gap: 12px; }
+    .rule-top { display: flex; align-items: center; justify-content: space-between; }
+    .rule-title { display: flex; align-items: center; gap: 8px; }
+    .rule-title .drag-icon { color: var(--text-muted); }
+    .rule-title span { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+    .btn-delete { background: none; border: none; font-size: 12px; font-weight: 500; color: var(--red-delete); cursor: pointer; padding: 6px 8px; border-radius: var(--radius-tag); font-family: var(--font); }
+    .btn-delete:hover { background: #fef2f2; }
+    /* Tabs pill */
+    .tabs-pill { display: flex; background: var(--bg-tab-inactive); border-radius: var(--radius-tag); overflow: hidden; }
+    .tab-item { flex: 1; text-align: center; padding: 6px 12px; font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer; border-radius: var(--radius-tag); transition: all 0.15s; border: 1px solid transparent; font-family: var(--font); background: none; }
+    .tab-item.active { background: var(--bg-card); border-color: var(--border-default); color: var(--blue-primary); box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    /* Section labels */
+    .section-label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; }
+    /* Dropdown */
+    .dropdown { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-tag); font-size: 13px; font-weight: 500; color: var(--text-primary); cursor: default; min-width: 0; font-family: var(--font); }
+    .dropdown .chevron { width: 14px; height: 14px; stroke: var(--text-muted); fill: none; stroke-width: 2; flex-shrink: 0; }
+    /* Operator tag */
+    .op-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background: var(--blue-light); border: 1px solid var(--blue-border); border-radius: var(--radius-tag); font-size: 13px; font-weight: 500; color: var(--blue-border); white-space: nowrap; }
+    .op-tag.negated { background: #fef2f2; border-color: var(--red-delete); color: var(--red-delete); }
+    /* Data tag */
+    .data-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: var(--bg-tag-data); border: 1px solid var(--border-tag-data); border-radius: var(--radius-tag); font-size: 13px; font-weight: 500; color: var(--text-data); }
+    .data-tag svg { width: 14px; height: 14px; stroke: var(--text-secondary); fill: none; stroke-width: 1.5; }
+    /* Filter row */
+    .filter-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .filter-row-group { display: flex; flex-direction: column; gap: 6px; }
+    .filter-row-with-label { display: flex; align-items: center; gap: 6px; }
+    .filter-row-with-label .et-label { font-size: 11px; font-weight: 600; color: var(--blue-primary); padding: 4px 0; }
+    /* Trash icon */
+    .trash-btn { background: none; border: none; cursor: pointer; padding: 4px; color: var(--text-muted); border-radius: 4px; display: flex; }
+    .trash-btn:hover { background: #fef2f2; color: var(--red-delete); }
+    .trash-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.5; }
+    /* Section divider */
+    .section-divider { display: flex; align-items: center; gap: 8px; }
+    .section-divider .label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; white-space: nowrap; }
+    .section-divider .line { flex: 1; height: 1px; background: var(--border-default); }
+    /* AND/OR divider */
+    .logic-divider { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
+    .logic-divider .line { flex: 1; height: 1px; background: var(--border-default); }
+    .logic-divider .logic-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: var(--radius-tag); font-size: 11px; font-weight: 600; }
+    .logic-divider .logic-badge.small { padding: 4px; font-size: 11px; color: var(--text-secondary); }
+    .logic-divider .logic-badge.primary { background: var(--blue-primary); color: white; padding: 2px 8px; cursor: default; }
+    .logic-divider .logic-badge.primary svg { width: 14px; height: 14px; stroke: white; fill: none; stroke-width: 2; }
+    /* Add button */
+    .btn-add { display: inline-flex; align-items: center; gap: 4px; padding: 6px 8px; border-radius: var(--radius-tag); font-size: 12px; font-weight: 500; color: var(--text-primary); background: var(--bg-card); border: 1px solid var(--border-default); cursor: pointer; font-family: var(--font); transition: all 0.15s; }
+    .btn-add:hover { border-color: var(--blue-primary); color: var(--blue-primary); }
+    .btn-add svg { width: 10px; height: 10px; stroke: var(--blue-primary); fill: none; stroke-width: 2.5; }
+    .btn-add.full-width { width: 100%; justify-content: center; }
+    /* Footer buttons */
+    .btn-secondary { flex: 0 0 auto; padding: 8px 12px; border-radius: var(--radius-input); font-size: 13px; font-weight: 500; color: var(--text-primary); background: var(--bg-card); border: 1px solid var(--border-default); cursor: pointer; font-family: var(--font); transition: all 0.15s; }
+    .btn-secondary:hover { border-color: var(--text-secondary); }
+    .btn-primary { flex: 1; padding: 8px 12px; border-radius: var(--radius-input); font-size: 13px; font-weight: 500; color: white; background: var(--blue-primary); border: none; cursor: pointer; font-family: var(--font); transition: all 0.15s; }
+    .btn-primary:hover { background: #1e54e6; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    /* JSON panel */
+    .json-panel { background: #0f172a; border-radius: var(--radius-card); padding: 16px; overflow: auto; max-height: 400px; }
+    .json-panel pre { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 12px; line-height: 1.5; color: #e2e8f0; margin: 0; }
+    .json-key { color: #a78bfa; }
+    .json-str { color: #34d399; }
+    .json-num { color: #fbbf24; }
+    .json-bool { color: #f87171; }
+    /* Trace table */
+    .trace-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .trace-table th { text-align: left; padding: 8px; background: var(--bg-tab-inactive); border-bottom: 1px solid var(--border-default); font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px; }
+    .trace-table td { padding: 8px; border-bottom: 1px solid var(--bg-tab-inactive); font-size: 12px; }
+    .trace-table td:first-child { color: var(--text-secondary); font-weight: 500; }
+    .trace-table td:last-child { font-family: 'JetBrains Mono', monospace; color: var(--text-primary); font-size: 11px; }
+    .trace-table tr:nth-child(even) { background: var(--bg-section); }
+    /* Result tabs */
+    .result-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border-default); background: var(--bg-section); border-radius: var(--radius-card) var(--radius-card) 0 0; overflow: hidden; }
+    .result-tab { padding: 10px 16px; font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer; border: none; background: none; border-bottom: 2px solid transparent; margin-bottom: -1px; font-family: var(--font); transition: all 0.15s; }
+    .result-tab:hover { color: var(--text-primary); }
+    .result-tab.active { color: var(--blue-primary); border-bottom-color: var(--blue-primary); background: var(--bg-card); }
+    /* Status badges */
+    .status-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .status-badge.success { background: #f0fdf4; color: #16a34a; }
+    .status-badge.error { background: #fef2f2; color: var(--red-delete); }
+    .status-badge.warning { background: #fffbeb; color: #d97706; }
+    .status-badge.info { background: var(--blue-light); color: var(--blue-primary); }
+    /* Examples */
+    .examples-section { display: flex; flex-direction: column; gap: 8px; }
+    .examples-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+    .example-chip { padding: 4px 10px; border-radius: var(--radius-tag); font-size: 11px; color: var(--text-secondary); background: var(--bg-card); border: 1px solid var(--border-default); cursor: pointer; font-family: var(--font); transition: all 0.15s; text-align: left; line-height: 1.4; }
+    .example-chip:hover { border-color: var(--blue-primary); color: var(--blue-primary); background: var(--blue-light); }
+    .example-chip:disabled { opacity: 0.5; cursor: not-allowed; }
+    /* Concordance modal */
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 100; display: flex; align-items: center; justify-content: center; }
+    .concordance-modal { background: var(--bg-card); border-radius: var(--radius-modal); max-width: 700px; width: 95vw; max-height: 85vh; overflow-y: auto; padding: 24px; box-shadow: 0 25px 50px rgba(0,0,0,0.25); }
+    .concordance-tag { display: inline-block; background: var(--blue-light); color: var(--blue-border); border-radius: 4px; padding: 1px 6px; font-size: 11px; margin: 2px; }
+    /* Spinner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--blue-primary); border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; }
+    /* Result wrapper */
+    .result-wrapper { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: var(--radius-card); overflow: hidden; }
+    .result-content { padding: 16px; }
+    /* Time window chip */
+    .tw-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; background: var(--bg-tab-inactive); border: 1px solid var(--border-default); border-radius: var(--radius-tag); font-size: 12px; color: var(--text-secondary); }
+    /* Sidebar on desktop */
+    @media (min-width: 1024px) {
+      body { padding: 40px 24px; }
+      .app-layout { display: grid; grid-template-columns: 1fr 300px; gap: 20px; max-width: 1000px; width: 100%; align-items: start; }
+      .modal { max-width: none; }
+    }
+    @media (max-width: 1023px) {
+      .app-layout { max-width: 680px; width: 100%; }
+      .sidebar { display: none; }
+    }
+    .sidebar { display: flex; flex-direction: column; gap: 12px; }
+    .sidebar-card { background: var(--bg-card); border: 1px solid var(--border-card); border-radius: var(--radius-card); overflow: hidden; }
+    .sidebar-card-header { padding: 12px 16px; background: var(--bg-section); border-bottom: 1px solid var(--border-default); font-size: 13px; font-weight: 600; color: var(--text-primary); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    .sidebar-card-body { padding: 12px; max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+    .rollup-item { padding: 8px; border-radius: var(--radius-input); font-size: 12px; background: var(--bg-section); border: 1px solid transparent; }
+    .rollup-item.active { background: var(--blue-light); border-color: var(--blue-primary); }
+    .rollup-item .name { font-weight: 600; color: var(--text-primary); margin-bottom: 2px; }
+    .rollup-item .key { font-family: monospace; color: var(--text-muted); font-size: 10px; }
+    .rollup-item .measures { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+    .rollup-item .measure-tag { background: var(--blue-light); color: var(--blue-primary); padding: 1px 6px; border-radius: 4px; font-size: 10px; }
+    .tips-card { padding: 16px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+    .tips-card p { margin-bottom: 4px; }
+    .tips-card strong { color: var(--text-primary); }
+    /* Textarea */
+    .prompt-textarea { width: 100%; border: 1px solid var(--border-default); border-radius: var(--radius-input); padding: 8px 12px; font-size: 13px; font-family: var(--font); color: var(--text-primary); background: var(--bg-card); outline: none; transition: border-color 0.15s; resize: none; }
+    .prompt-textarea:focus { border-color: var(--blue-primary); }
+    .prompt-textarea::placeholder { color: var(--text-muted); }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useCallback } = React;
+/* =============================================================
+   ROLLUP SCHEMA
+============================================================= */
+const ROLLUPS = {
+  completed_orders: {
+    icon: "🛒",
+    label: "Commandes complétées",
+    keywords: /\bcommandes?\b|\bachats?\b|\border\b|\bacheté[e]?\b|\bcommandé[e]?\b|\bpurchase[s]?\b|\bconverti[e]?\b|\bpanier\b|\bfait?\s+(?:un[e]?\s+)?achat\b|\bpassé[e]?\s*(?:une?\s+)?commande\b|\bréalis[eé]\s*(?:une?\s+)?commande\b|\beffectué[e]?\s*(?:un[e]?\s+)?achat\b|\bshoppé?\b|\borg[eé]r[e]?\b/i,
+    measures: {
+      order_total_price: { label: "Montant total", keywords: /\bdépensé\b|\bmontant\b|\bpanier\s*moyen\b|\bsomme\b|\btotal\b|\bvaleur\b|\b€\b|\beuros?\b|\bca\b/i },
+      order_items_count: { label: "Nb articles", keywords: /\barticles?\b|\bproduits?\b|\bitems?\b|\bquantité\b|\bréférence\b/i },
+      order_currency: { label: "Devise", keywords: /\bdevise\b|\bcurrency\b|\bmonnaie\b/i },
+    },
+    dimensions: {
+      order_status: { label: "Statut commande", keywords: /\bstatut\b|\bstatus\b|\bétat\b|\bannulé\b|\bremboursé\b|\blivré\b|\ben\s*attente\b/i },
+      order_channel: { label: "Canal commande", keywords: /\bcanal\b|\bchannel\b|\ben\s*ligne\b|\bphysique\b|\bweb\b|\bstore\b/i },
+    },
+    defaultMeasure: "count",
+    defaultOperator: "gte",
+  },
+  customer_properties: {
+    icon: "👤",
+    label: "Propriétés client",
+    keywords: /\bclients?\s+(?:français|anglais|espagnols?|allemands?|belges?|suisses?|canadiens?)\b|\bpays\b|\bcountry\b|\bnationalit[eé]\b|\blocalisation\b|\bvip\b|\bpremium\b|\bfidèle\b|\b[aâ]ge\b|\banniversaire\b|\bbirthday\b|\bsexe\b|\bgenre\b|\bprofession\b|\benregistr[eé]\b|\binscrit[e]?\b|\btags?\b|\bsegment\s*client\b|\bpropri[eé]t[eé][s]?\s*client\b/i,
+    measures: {
+      customer_age: { label: "Âge", keywords: /\b[aâ]ge\b|\bans?\b|\bannée[s]?\b/i },
+      customer_country: { label: "Pays", keywords: /\bpays\b|\bcountry\b|\bnationalit[eé]\b|\bfrançais\b|\banglais\b|\bespagnols?\b/i },
+      customer_gender: { label: "Genre", keywords: /\bsexe\b|\bgenre\b|\bhomme\b|\bfemme\b/i },
+      customer_tag: { label: "Tag", keywords: /\btags?\b|\blabel\b|\bmarque\b/i },
+    },
+    dimensions: {},
+    defaultMeasure: "customer_age",
+    defaultOperator: "lte",
+  },
+  completed_mission: {
+    icon: "🎯",
+    label: "Missions complétées",
+    keywords: /\bmissions?\b|\bdéfis?\b|\bchallenges?\b|\btâches?\b|\baccomplies?\b|\btermin[eé][e]?\b|\bfinalis[eé][e]?\b|\bvalid[eé][e]?\b|\bcomplet[eé][e]?\b|\bréalis[eé][e]?\b|\bparticip[eé][e]?\b|\bremport[eé][e]?\b|\bdéfi\s*relevé\b/i,
+    measures: {
+      mission_type: { label: "Type mission", keywords: /\btype\b|\bcatégorie\b|\bkind\b/i },
+      mission_points: { label: "Points mission", keywords: /\bpoints?\b|\brécompense\b/i },
+    },
+    dimensions: {
+      mission_id: { label: "ID mission", keywords: /\bid\b|\bidentifiant\b|\bspécifique\b|\bparticulière\b/i },
+    },
+    defaultMeasure: "count",
+    defaultOperator: "gte",
+  },
+  points_transaction: {
+    icon: "⭐",
+    label: "Transactions de points",
+    keywords: /\bpoints?\b|\bsolde\b|\bcrédit[s]?\b|\bbalance\b|\btoken[s]?\b|\bpoints?\s*(?:gagné[e]?[s]?|accumulé[e]?[s]?|dépensé[e]?[s]?|utilisé[e]?[s]?|crédité[e]?[s]?)\b|\bgagné[e]?\s*des?\s*points?\b|\bdépensé[e]?\s*des?\s*points?\b|\baccumul[eé]\b|\bcumulé[e]?\b|\bfidélité\b/i,
+    measures: {
+      points_amount: { label: "Montant points", keywords: /\bpoints?\b|\bmontant\b|\bcombien\b/i },
+      transaction_type: { label: "Type transaction", keywords: /\btype\b|\bcrédit\b|\bdébit\b/i },
+    },
+    dimensions: {
+      transaction_source: { label: "Source", keywords: /\bsource\b|\borigine\b|\bprovenance\b/i },
+    },
+    defaultMeasure: "points_amount",
+    defaultOperator: "gte",
+  },
+  referral_completed_godfather: {
+    icon: "🤝",
+    label: "Parrainages (parrain)",
+    keywords: /\bparrain[s]?\b|\bgodfather\b|\bparrainé[e]?\b|\bréféré[e]?\b|\bréférence[s]?\b|\bparrainage[s]?\b|\bfilleul[s]?\s*(?:recrutés?|invités?|amenés?|apportés?|obtenus?|générés?)|\brecruté[e]?\b|\binvit[eé][e]?\b/i,
+    measures: {},
+    dimensions: {},
+    defaultMeasure: "count",
+    defaultOperator: "gte",
+  },
+  referral_completed_godson: {
+    icon: "👶",
+    label: "Parrainages (filleul)",
+    keywords: /\bfilleul[s]?\b|\bgodson\b|\bparrainé[e]?\s*(?:par|depuis)\b|\bcode\s*(?:de\s*)?parrainage\b|\blien\s*(?:de\s*)?parrainage\b|\ba\s*été\s*parrainé[e]?\b|\binvité[e]?\s*(?:par|via)\b/i,
+    measures: {},
+    dimensions: {},
+    defaultMeasure: "count",
+    defaultOperator: "gte",
+  },
+  reward_used: {
+    icon: "🎁",
+    label: "Récompenses utilisées",
+    keywords: /\brécompense[s]?\s*(?:utilisée?[s]?|consommée?[s]?|échangée?[s]?|rachetée?[s]?|dépensée?[s]?|activée?[s]?)\b|\butilis[eé]\s*(?:une?\s+)?récompense\b|\béchangé[e]?\s*(?:une?\s+)?récompense\b|\bredeem\b|\bbons?\s*(?:de\s*réduction|d['']achat)\b|\bcoupon[s]?\s*utilisé[s]?\b|\boffre[s]?\s*activée?[s]?\b/i,
+    measures: {
+      reward_type: { label: "Type récompense", keywords: /\btype\b|\bcatégorie\b|\bkind\b|\bbon\b|\bcoupon\b/i },
+    },
+    dimensions: {
+      reward_id: { label: "ID récompense", keywords: /\bid\b|\bidentifiant\b|\bspécifique\b/i },
+    },
+    defaultMeasure: "count",
+    defaultOperator: "gte",
+  },
+  reward_obtained: {
+    icon: "🏆",
+    label: "Récompenses obtenues",
+    keywords: /\brécompense[s]?\s*(?:obtenue?[s]?|gagnée?[s]?|reçue?[s]?|débloquée?[s]?|acquise?[s]?|créditée?[s]?)\b|\bobtenu[e]?\s*(?:une?\s+)?récompense\b|\bgagné[e]?\s*(?:une?\s+)?récompense\b|\brécompensé[e]?\b|\bbadge[s]?\s*(?:obtenu[e]?[s]?|gagné[e]?[s]?|débloqué[e]?[s]?)\b|\bniveau\s*(?:atteint|débloqué)\b/i,
+    measures: {
+      reward_type: { label: "Type récompense", keywords: /\btype\b|\bcatégorie\b|\bbadge\b|\bniveau\b/i },
+    },
+    dimensions: {
+      reward_id: { label: "ID récompense", keywords: /\bid\b|\bspécifique\b/i },
+    },
+    defaultMeasure: "count",
+    defaultOperator: "gte",
+  },
+};
+/* =============================================================
+   CONCORDANCE MAP
+============================================================= */
+const CONCORDANCE_MAP = {
+  "completed_orders 🛒": [
+    "commande(s)", "achat(s)", "acheté(e)", "commandé(e)",
+    "a fait un achat", "a passé une commande", "a réalisé une commande",
+    "a effectué un achat", "shoppé", "converti(e)", "panier",
+    "order", "purchase",
+  ],
+  "completed_mission 🎯": [
+    "mission(s)", "défi(s)", "challenge(s)", "tâche(s)",
+    "accomplie(s)", "terminé(e)", "finalisé(e)", "validé(e)",
+    "complété(e)", "réalisé(e)", "participé", "remporté(e)", "défi relevé",
+  ],
+  "points_transaction ⭐": [
+    "point(s)", "solde", "crédit(s)", "points gagnés", "points dépensés",
+    "points accumulés", "cumulé", "balance", "fidélité",
+  ],
+  "referral_completed_godfather 🤝": [
+    "parrain", "a parrainé", "a référé",
+    "filleuls recrutés", "invités", "référence", "parrainage",
+  ],
+  "referral_completed_godson 👶": [
+    "filleul", "a été parrainé", "code parrainage",
+    "lien parrainage", "invité par",
+  ],
+  "reward_used 🎁": [
+    "récompense utilisée", "récompense consommée", "récompense échangée",
+    "bon de réduction utilisé", "coupon utilisé", "offre activée", "redeem",
+  ],
+  "reward_obtained 🏆": [
+    "récompense obtenue", "récompense gagnée", "badge obtenu",
+    "niveau atteint", "récompensé(e)", "débloqué",
+  ],
+  "Logique ET / OU": [
+    "et (ayant / qui / avec / sans) → AND",
+    "ainsi que → AND",
+    "mais aussi → AND",
+    "de même → AND",
+    "ou / ou bien → OR",
+    "ou encore → OR",
+    "soit → OR",
+    "⚠️ 'entre X et Y' n'est pas splitté",
+  ],
+  "Nombres textuels": [
+    "zéro → 0", "un/une → 1", "deux → 2", "trois → 3", "quatre → 4",
+    "cinq → 5", "six → 6", "sept → 7", "huit → 8", "neuf → 9", "dix → 10",
+    "quinze → 15", "vingt → 20", "trente → 30",
+    "plusieurs → ≥2", "quelques → ≥2",
+  ],
+  "Opérateurs": [
+    "au moins / minimum / au minimum → ≥",
+    "plus de / strictement plus → >",
+    "au plus / maximum / pas plus de → ≤",
+    "moins de / strictement moins → <",
+    "exactement / juste / pile → =",
+    "entre X et Y / compris entre → entre",
+    "sans / jamais / n'ayant pas / aucune → exclusion",
+  ],
+  "Fenêtres temporelles": [
+    "les X derniers jours/semaines/mois/ans",
+    "dans les X derniers jours",
+    "sur les X derniers jours",
+    "depuis X jours",
+    "ce mois-ci / ce mois",
+    "cette année",
+    "hier → 1 jour",
+    "la semaine dernière → 7 jours",
+    "le mois dernier → 30 jours",
+    "l'année dernière → 1 an",
+    "cette semaine → semaine courante",
+    "ce trimestre → 3 mois courants",
+    "ce semestre → 6 mois courants",
+    "en janvier / en février… → mois nommé",
+    "depuis le JJ/MM/AAAA",
+    "du JJ/MM au JJ/MM",
+  ],
+};
+/* =============================================================
+   EXEMPLES
+============================================================= */
+const EXAMPLES = [
+  "Clients ayant réalisé 2 commandes sur les 15 derniers jours",
+  "Clients ayant acheté 3 fois ce mois-ci",
+  "Clients ayant commandé au moins 5 fois cette année",
+  "Clients ayant passé une commande hier",
+  "Clients ayant dépensé plus de 150€ ce mois-ci",
+  "Clients ayant dépensé plus de 200€ le mois dernier",
+  "Clients ayant complété au moins 3 missions dans les 30 derniers jours",
+  "Clients ayant terminé deux défis cette semaine",
+  "Clients ayant gagné plus de 500 points cette année",
+  "Clients ayant accumulé au moins 1000 points depuis 90 jours",
+  "Clients parrains ayant référé au moins 2 filleuls",
+  "Clients sans commande depuis 60 jours",
+  "Clients n'ayant pas commandé cette année",
+  "Clients ayant utilisé une récompense dans les 7 derniers jours",
+  "Clients ayant obtenu un badge ce semestre",
+  "Clients ayant entre 2 et 5 commandes ce mois-ci",
+  "Clients de moins de 30 ans",
+  "Clients ayant dépensé exactement 100€",
+  "Clients ayant commandé plus de 3 fois ET complété au moins 2 missions",
+  "Clients français ayant acheté 5 fois ET parrainé au moins 1 filleul",
+  "Clients ayant dépensé plus de 100€ et complété trois missions ce mois-ci",
+  "Clients ayant plus de 500 points OU utilisé une récompense ce mois-ci",
+  "Clients ayant acheté 3 fois ou ayant obtenu un badge",
+];
+/* =============================================================
+   PARSER (identical logic, unchanged)
+============================================================= */
+function detectRollup(text) {
+  const scores = {};
+  for (const [key, r] of Object.entries(ROLLUPS)) {
+    const matches = text.match(new RegExp(r.keywords.source, "gi")) || [];
+    scores[key] = matches.length;
+  }
+  const best = Object.entries(scores).sort((a, b) => b[1] - a[1])[0];
+  return best && best[1] > 0 ? best[0] : null;
+}
+function detectTimeWindow(t) {
+  if (/\bhier\b/i.test(t))
+    return { type: "relative_last", value: 1, unit: "days", label: "hier" };
+  if (/(?:la\s+)?semaine\s+(?:derni[eè]re|pass[eé]e)/i.test(t))
+    return { type: "relative_last", value: 7, unit: "days", label: "semaine dernière" };
+  if (/(?:le\s+)?mois\s+(?:dernier|pass[eé])/i.test(t))
+    return { type: "relative_last", value: 30, unit: "days", label: "mois dernier" };
+  if (/(?:l[''])?an(?:née)?\s+(?:derni[eè]re?|pass[eé]e?)/i.test(t))
+    return { type: "relative_last", value: 1, unit: "years", label: "année dernière" };
+  const m1 = t.match(/(?:sur\s+)?(?:les\s+)?(\d+)\s*derniers?\s*(jours?|semaines?|mois|ans?)/i);
+  if (m1) {
+    const u = m1[2].toLowerCase();
+    const unit = u.startsWith("j") ? "days" : u.startsWith("s") ? "weeks" : u.startsWith("m") ? "months" : "years";
+    return { type: "relative_last", value: parseInt(m1[1]), unit, label: m1[1]+" derniers "+m1[2] };
+  }
+  const m2 = t.match(/dans\s+les\s+(\d+)\s*(jours?|semaines?|mois|ans?)/i);
+  if (m2) {
+    const u = m2[2].toLowerCase();
+    const unit = u.startsWith("j") ? "days" : u.startsWith("s") ? "weeks" : u.startsWith("m") ? "months" : "years";
+    return { type: "relative_last", value: parseInt(m2[1]), unit, label: "dans les "+m2[1]+" "+m2[2] };
+  }
+  const m3 = t.match(/depuis\s+(\d+)\s*(jours?|semaines?|mois|ans?)/i);
+  if (m3) {
+    const u = m3[2].toLowerCase();
+    const unit = u.startsWith("j") ? "days" : u.startsWith("s") ? "weeks" : u.startsWith("m") ? "months" : "years";
+    return { type: "relative_last", value: parseInt(m3[1]), unit, label: "depuis "+m3[1]+" "+m3[2] };
+  }
+  if (/cette\s*semaine/i.test(t))
+    return { type: "relative_current", value: 1, unit: "weeks", label: "cette semaine" };
+  if (/ce\s+(?:trimestre|quarter)/i.test(t))
+    return { type: "relative_current", value: 3, unit: "months", label: "ce trimestre" };
+  if (/ce\s+semestre/i.test(t))
+    return { type: "relative_current", value: 6, unit: "months", label: "ce semestre" };
+  if (/ce\s*mois[- ]?ci|ce\s+mois\b/i.test(t))
+    return { type: "relative_current", value: 1, unit: "months", label: "ce mois-ci" };
+  if (/cette\s*ann[eé]e\b/i.test(t))
+    return { type: "relative_current", value: 1, unit: "years", label: "cette année" };
+  const MONTHS = {
+    janvier:1, février:2, mars:3, avril:4, mai:5, juin:6,
+    juillet:7, août:8, septembre:9, octobre:10, novembre:11, décembre:12,
+    jan:1, fév:2, avr:4, juil:7, sep:9, oct:10, nov:11, déc:12,
+  };
+  const mMonth = t.match(/\ben\s+(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre|jan|fév|avr|juil|sep|oct|nov|déc)\b/i)
+    || t.match(/\bau\s+mois\s+(?:de\s+)?(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\b/i);
+  if (mMonth) {
+    const name = mMonth[1].toLowerCase();
+    return { type: "absolute_month", value: MONTHS[name], unit: "month", label: "en "+mMonth[1] };
+  }
+  const mRange = t.match(/du\s+(\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)\s+au\s+(\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)/i);
+  if (mRange)
+    return { type: "absolute", start: mRange[1], end: mRange[2], label: "du "+mRange[1]+" au "+mRange[2] };
+  const mAbs = t.match(/depuis\s+le\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i);
+  if (mAbs)
+    return { type: "absolute", start: mAbs[1], label: "depuis le "+mAbs[1] };
+  return null;
+}
+function detectOperator(t) {
+  if (/\bexactement\b|\bjuste\b|\bpile\b|==?\s*\d/i.test(t)) return "eq";
+  if (/strictement\s*(?:plus|sup[eé]rieur)|\bau[-\s]*del[aà]\s*de\b/i.test(t)) return "gt";
+  if (/strictement\s*(?:moins|inf[eé]rieur)/i.test(t)) return "lt";
+  if (/\bau\s*plus\b|\bmaximum\b|\bau\s*maximum\b|<=\s*\d|\bpas\s*plus\s*de\b|\binférieur[e]?\s*ou\s*égal/i.test(t)) return "lte";
+  if (/\bmoins\s*de\b|\binférieur[e]?\s*à\b|\ben\s*dessous\s*de\b/i.test(t)) return "lt";
+  if (/\bentre\s+\d|\bcompris\s+entre\b/i.test(t)) return "between";
+  if (/\bau\s*moins\b|\bminimum\b|\bau\s*minimum\b|\bplus\s*de\b|\bsupérieur[e]?\s*ou\s*égal|>=\s*\d/i.test(t)) return "gte";
+  return "gte";
+}
+function extractTextualNumber(t) {
+  const wordToNum = {
+    "zéro":0,"zero":0,"aucun":0,"aucune":0,"un":1,"une":1,
+    "deux":2,"trois":3,"quatre":4,"cinq":5,"six":6,"sept":7,
+    "huit":8,"neuf":9,"dix":10,"onze":11,"douze":12,"treize":13,
+    "quatorze":14,"quinze":15,"seize":16,"vingt":20,"trente":30,
+    "plusieurs":2,"quelques":2,
+  };
+  if (/\bplusieurs\b/i.test(t)) return { value: 2, word: "plusieurs" };
+  if (/\bquelques\b/i.test(t)) return { value: 2, word: "quelques" };
+  const quantityWords = "commandes?|achats?|missions?|défis?|fois|transactions?|parrainages?|filleuls?|récompenses?|points?|badges?|tâches?";
+  const numWords = "zéro|zero|aucune?|une?|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|onze|douze|treize|quatorze|quinze|seize|vingt|trente";
+  const pattern = new RegExp("\\b("+numWords+")\\s+(?:"+quantityWords+")\\b", "i");
+  const m = t.match(pattern);
+  if (m) {
+    const w = m[1].toLowerCase();
+    if (wordToNum[w] !== undefined) return { value: wordToNum[w], word: w };
+  }
+  const m2 = t.match(new RegExp("(?:au\\s*moins|minimum|plus\\s*de|au\\s*minimum)\\s+("+numWords+")\\b", "i"));
+  if (m2) {
+    const w = m2[1].toLowerCase();
+    if (wordToNum[w] !== undefined) return { value: wordToNum[w], word: w };
+  }
+  return null;
+}
+function extractNumericValue(t) {
+  const textResult = extractTextualNumber(t);
+  if (textResult !== null) return { value: textResult.value, textual: textResult.word };
+  const patterns = [
+    /(?:au\s*moins|minimum|plus\s*de|au\s*minimum|>=?)\s*(\d+(?:[.,]\d+)?)/i,
+    /exactement\s+(\d+(?:[.,]\d+)?)/i,
+    /juste\s+(\d+(?:[.,]\d+)?)/i,
+    /pile\s+(\d+(?:[.,]\d+)?)/i,
+    /(\d+(?:[.,]\d+)?)\s*(?:commandes?|achats?|missions?|points?|parrainages?|filleuls?|récompenses?|transactions?|euros?|€|fois|badges?|tâches?|défis?)/i,
+    /(?:au\s*plus|maximum|au\s*maximum|<=?)\s*(\d+(?:[.,]\d+)?)/i,
+    /moins\s*de\s*(\d+(?:[.,]\d+)?)/i,
+    /\b(\d+(?:[.,]\d+)?)\s*€\b/i,
+    /\b(\d+(?:[.,]\d+)?)\b/i,
+  ];
+  for (const p of patterns) {
+    const m = t.match(p);
+    if (m) return { value: parseFloat(m[1].replace(",", ".")), textual: null };
+  }
+  return { value: 1, textual: null };
+}
+function extractBetweenValues(t) {
+  const m = t.match(/(?:compris\s+)?entre\s+(\d+(?:[.,]\d+)?)\s+et\s+(\d+(?:[.,]\d+)?)/i);
+  if (m) return [parseFloat(m[1].replace(",", ".")), parseFloat(m[2].replace(",", "."))];
+  return null;
+}
+function detectMeasureField(rollupKey, t) {
+  if (!rollupKey) return null;
+  for (const [field, def] of Object.entries(ROLLUPS[rollupKey].measures || {})) {
+    if (def.keywords && def.keywords.test(t)) return field;
+  }
+  return null;
+}
+function detectDimensionFilters(rollupKey, t) {
+  const filters = {};
+  const countryCodes = {
+    "français":"FR","française":"FR","france":"FR",
+    "anglais":"GB","britannique":"GB","uk":"GB",
+    "espagnols?":"ES","allemands?":"DE",
+    "belges?":"BE","suisses?":"CH",
+    "canadiens?":"CA","américains?":"US","italiens?":"IT",
+  };
+  for (const [word, code] of Object.entries(countryCodes)) {
+    if (new RegExp("\\b"+word+"\\b", "i").test(t)) { filters["customer_country"] = code; break; }
+  }
+  if (rollupKey) {
+    for (const [field, def] of Object.entries(ROLLUPS[rollupKey].dimensions || {})) {
+      if (def.keywords && def.keywords.test(t)) {
+        const vm = t.match(new RegExp(def.label+"\\s*[=:>]?\\s*[\"']?([\\w-]+)[\"']?", "i"));
+        if (vm) filters[field] = vm[1];
+      }
+    }
+  }
+  return filters;
+}
+/* =============================================================
+   COMPOUND LOGIC SPLIT
+============================================================= */
+function splitByLogic(text) {
+  const protectedText = text.replace(
+    /entre\s+\d+(?:[.,]\d+)?\s+et\s+\d+(?:[.,]\d+)?/gi,
+    m => m.replace(/\s+et\s+/i, " \u2295 ")
+  );
+  const restore = s => s.replace(/\u2295/g, " et ");
+  const orParts = protectedText.split(
+    /\s+(?:ou(?:\s+bien)?|ou\s+encore|soit)\s+/i
+  );
+  if (orParts.length > 1) {
+    return { parts: orParts.map(p => restore(p).trim()), logic: "OR" };
+  }
+  const andStrict = protectedText.split(
+    /\s+(?:et|ainsi\s+que|mais\s+aussi|de\s+même)\s+(?=(?:ayant|qui\s+a|avec|sans|n['']ayant|jamais|possédant|ayant\s+au)\b)/i
+  );
+  if (andStrict.length > 1) {
+    return { parts: andStrict.map(p => restore(p).trim()), logic: "AND" };
+  }
+  const andLoose = protectedText.split(/\s+et\s+/i);
+  if (andLoose.length > 1) {
+    const restoredParts = andLoose.map(p => restore(p).trim());
+    const validCount = restoredParts.filter(p =>
+      Object.values(ROLLUPS).some(r => r.keywords.test(p))
+    ).length;
+    if (validCount >= 2) {
+      return { parts: restoredParts, logic: "AND" };
+    }
+  }
+  return { parts: [text], logic: "AND" };
+}
+/* =============================================================
+   MAIN PARSE
+============================================================= */
+const OP_LABELS = {
+  gte: "Supérieur ou égal à", gt: "Supérieur à", lte: "Inférieur ou égal à",
+  lt: "Inférieur à", eq: "Égal à", between: "Entre",
+  neq: "Différent de",
+};
+const OP_SHORT = {
+  gte: "≥", gt: ">", lte: "≤", lt: "<", eq: "=", between: "↔", neq: "≠",
+};
+function parsePrompt(text) {
+  const t = text.trim();
+  const tl = t.toLowerCase();
+  const warnings = [];
+  const errors = [];
+  const trace = [];
+  const isNegated = /n['']ayant\s*pas|sans\s*(?:avoir|commande|mission|achat|point|récompense)|jamais\s*(?:command|achet|complet|gagné|utilisé|obtenu)|aucune?\s*(?:commande|mission|achat|récompense)/i.test(t);
+  trace.push({ step: "Négation / exclusion", result: isNegated ? "Oui — mode exclusion" : "Non" });
+  const rollupKey = detectRollup(tl);
+  if (!rollupKey) errors.push("Rollup non reconnu. Essayez : commande, mission, point, parrainage, récompense.");
+  trace.push({ step: "Rollup détecté", result: rollupKey ? ROLLUPS[rollupKey].icon+" "+rollupKey+" — "+ROLLUPS[rollupKey].label : "Aucun rollup reconnu" });
+  const timeWindow = detectTimeWindow(t);
+  trace.push({ step: "Fenêtre temporelle", result: timeWindow ? timeWindow.label+" ("+timeWindow.type+")" : "Toutes périodes" });
+  const operator = isNegated ? "eq" : detectOperator(tl);
+  trace.push({ step: "Opérateur", result: (OP_LABELS[operator] || operator)+(isNegated ? " [forcé par négation]" : "") });
+  const betweenVals = operator === "between" ? extractBetweenValues(tl) : null;
+  const numResult = extractNumericValue(tl);
+  const value = isNegated ? 0 : (betweenVals ? betweenVals[0] : numResult.value);
+  trace.push({
+    step: "Valeur extraite",
+    result: numResult.textual
+      ? value+'  (depuis texte : "'+numResult.textual+'")'
+      : value+(betweenVals ? " à "+betweenVals[1] : ""),
+  });
+  if (numResult.value === 1 && !numResult.textual && !isNegated && !/\b1\b/.test(t)) {
+    warnings.push("Aucune valeur numérique détectée — défaut : 1");
+  }
+  const measureField = detectMeasureField(rollupKey, tl);
+  const effectiveMeasure = measureField || (rollupKey ? ROLLUPS[rollupKey].defaultMeasure : "count");
+  trace.push({ step: "Mesure", result: measureField ? measureField+" (détecté)" : effectiveMeasure+" (défaut)" });
+  const dimensionFilters = detectDimensionFilters(rollupKey, tl);
+  if (Object.keys(dimensionFilters).length > 0) {
+    trace.push({ step: "Filtres dimension", result: JSON.stringify(dimensionFilters) });
+  }
+  if (!rollupKey) return { success: false, errors, warnings, raw: text, trace, segment: null };
+  const condition = {
+    rollup: rollupKey,
+    ...(effectiveMeasure !== "count" ? { measure: effectiveMeasure } : {}),
+    operator,
+    value,
+    ...(betweenVals ? { value_max: betweenVals[1] } : {}),
+    ...(timeWindow ? { time_window: timeWindow } : {}),
+    ...(isNegated ? { negated: true } : {}),
+    ...(Object.keys(dimensionFilters).length > 0 ? { dimension_filters: dimensionFilters } : {}),
+  };
+  return {
+    success: true, errors, warnings, raw: text, trace,
+    segment: { version: "1.0", logic: "AND", conditions: [condition] },
+  };
+}
+function parseCompoundPrompt(text) {
+  const { parts, logic } = splitByLogic(text);
+  if (parts.length === 1) {
+    return { ...parsePrompt(text), isCompound: false, logic };
+  }
+  const subResults = parts.map(part => {
+    const r = parsePrompt(part);
+    if (!r.success) {
+      const prefixed = parsePrompt("ayant " + part);
+      return prefixed.success ? { ...prefixed, raw: part } : r;
+    }
+    return r;
+  });
+  const validResults = subResults.filter(r => r.success);
+  if (validResults.length === 0) return { ...parsePrompt(text), isCompound: false, logic };
+  if (validResults.length === 1) return { ...validResults[0], isCompound: false, logic };
+  const allConditions = validResults.flatMap(r => r.segment.conditions);
+  const allWarnings = subResults.flatMap(r => r.warnings);
+  const allErrors = subResults.filter(r => !r.success).flatMap(r => r.errors);
+  const combinedTrace = [
+    { step: "Logique compound", result: logic+" — "+parts.length+" clauses détectées" },
+    ...subResults.flatMap((r, i) => [
+      { step: "Clause "+(i+1), result: '"'+parts[i]+'"' },
+      ...r.trace.map(t => ({ step: "  "+t.step, result: t.result })),
+    ]),
+  ];
+  return {
+    success: true, errors: allErrors, warnings: allWarnings,
+    raw: text, trace: combinedTrace, isCompound: true, logic,
+    clauseParts: parts,
+    segment: { version: "1.0", logic, conditions: allConditions },
+  };
+}
+/* =============================================================
+   CLAUDE AI INTEGRATION
+============================================================= */
+const CLAUDE_SYSTEM_PROMPT = `Tu es un moteur de segmentation pour Loyoly, une plateforme de fidélité e-commerce.
+Tu reçois une description en langage naturel (français) d'un segment de clients et tu dois la convertir en un objet JSON structuré.
+## Rollups disponibles (type d'action client)
+- completed_orders : commandes passées (acheté, commandé, achat, purchase, converti, panier...)
+- customer_properties : propriétés client (pays, âge, genre, tags, VIP, inscrit...)
+- completed_mission : missions complétées (mission, défi, challenge, tâche, accompli, validé...)
+- points_transaction : transactions de points (points, solde, crédit, accumulé, cumulé, fidélité...)
+- referral_completed_godfather : parrainages en tant que parrain (parrain, parrainé, référé, filleuls recrutés...)
+- referral_completed_godson : parrainages en tant que filleul (filleul, a été parrainé, code parrainage...)
+- reward_used : récompenses utilisées (récompense utilisée, bon de réduction, coupon utilisé, redeem...)
+- reward_obtained : récompenses/badges obtenus (récompense obtenue, badge, niveau atteint, débloqué...)
+## Opérateurs disponibles
+- "gte" : au moins, minimum, au minimum, plus de
+- "gt" : strictement plus de, au-delà de
+- "lte" : au plus, maximum, pas plus de
+- "lt" : moins de, strictement moins, inférieur à
+- "eq" : exactement, juste, pile
+- "between" : entre X et Y, compris entre
+Pour une négation (sans, jamais, n'ayant pas, aucune), utilise operator "eq" et value 0 avec negated: true.
+## Fenêtres temporelles (time_window)
+Format relatif : { "type": "relative_last", "value": N, "unit": "days"|"weeks"|"months"|"years" }
+Format courant : { "type": "relative_current", "value": 1, "unit": "weeks"|"months"|"years" }
+Format absolu mois : { "type": "absolute_month", "value": N_du_mois_1_à_12, "unit": "month" }
+## Format de sortie
+Réponds UNIQUEMENT avec du JSON valide, sans markdown, sans explication.
+{
+  "version": "1.0",
+  "logic": "AND",
+  "conditions": [
+    {
+      "rollup": "completed_orders",
+      "operator": "gte",
+      "value": 3,
+      "time_window": { "type": "relative_current", "value": 1, "unit": "months" }
+    }
+  ]
+}`;
+async function callClaudeAPI(text, apiKey) {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 1024,
+      system: CLAUDE_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: text }],
+    }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || "Erreur HTTP "+response.status);
+  }
+  const data = await response.json();
+  const rawText = (data.content?.[0]?.text || "").trim();
+  const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Réponse inattendue de Claude : "+rawText.slice(0, 120));
+  return { segment: JSON.parse(jsonMatch[0]), raw: rawText };
+}
+/* =============================================================
+   SVG ICONS
+============================================================= */
+const IconClose = () => <svg viewBox="0 0 12 12"><line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/></svg>;
+const IconFilter = () => <svg viewBox="0 0 16 16" style={{width:16,height:16,stroke:'var(--text-secondary)',fill:'none',strokeWidth:1.5}}><path d="M1 3h14M3 8h10M5 13h6"/></svg>;
+const IconChevron = () => <svg className="chevron" viewBox="0 0 14 14"><path d="M3 5l4 4 4-4" fill="none"/></svg>;
+const IconPlus = () => <svg viewBox="0 0 10 10"><line x1="5" y1="0" x2="5" y2="10"/><line x1="0" y1="5" x2="10" y2="5"/></svg>;
+const IconTrash = () => <svg viewBox="0 0 14 14"><path d="M2 4h10M5 4V2h4v2M4 4v8h6V4"/></svg>;
+const IconDrag = () => <svg viewBox="0 0 18 18" style={{width:18,height:18,fill:'var(--text-muted)'}}><circle cx="7" cy="5" r="1.2"/><circle cx="11" cy="5" r="1.2"/><circle cx="7" cy="9" r="1.2"/><circle cx="11" cy="9" r="1.2"/><circle cx="7" cy="13" r="1.2"/><circle cx="11" cy="13" r="1.2"/></svg>;
+const IconDatabase = () => <svg viewBox="0 0 14 14" style={{width:14,height:14,stroke:'var(--text-secondary)',fill:'none',strokeWidth:1.5}}><ellipse cx="7" cy="3" rx="5" ry="2"/><path d="M2 3v8c0 1.1 2.2 2 5 2s5-.9 5-2V3"/><path d="M2 7c0 1.1 2.2 2 5 2s5-.9 5-2"/></svg>;
+/* =============================================================
+   UI COMPONENTS
+============================================================= */
+function ConditionCard({ condition, index }) {
+  const rollup = ROLLUPS[condition.rollup];
+  const measureLabel = condition.measure
+    ? (rollup?.measures?.[condition.measure]?.label || condition.measure)
+    : (rollup?.label || condition.rollup);
+  const opLabel = OP_LABELS[condition.operator] || condition.operator;
+  const valueStr = condition.operator === "between"
+    ? condition.value+" – "+condition.value_max
+    : String(condition.value);
+  return (
+    <div className="rule-card">
+      <div className="rule-top">
+        <div className="rule-title">
+          <IconDrag />
+          <span>Règle {String(index+1).padStart(2,'0')}</span>
+        </div>
+      </div>
+      {/* Tabs */}
+      <div className="tabs-pill">
+        <button className={"tab-item"+(condition.rollup !== "customer_properties" ? " active" : "")}>
+          Comportements
+        </button>
+        <button className={"tab-item"+(condition.rollup === "customer_properties" ? " active" : "")}>
+          Profil client
+        </button>
+      </div>
+      {/* Basé sur */}
+      <div className="filter-row" style={{gap:12}}>
+        <span className="section-label">Basé sur</span>
+        <span className="dropdown">
+          <span>{rollup?.icon} {rollup?.label || condition.rollup}</span>
+          <IconChevron />
+        </span>
+      </div>
+      {/* Période */}
+      {condition.time_window && (
+        <div className="filter-row" style={{gap:12}}>
+          <span className="section-label">Période</span>
+          <span className="dropdown">
+            <span>{condition.time_window.label || JSON.stringify(condition.time_window)}</span>
+            <IconChevron />
+          </span>
+        </div>
+      )}
+      {!condition.time_window && (
+        <div className="filter-row" style={{gap:12}}>
+          <span className="section-label">Période</span>
+          <span className="dropdown">
+            <span>Toutes dates</span>
+            <IconChevron />
+          </span>
+        </div>
+      )}
+      {/* Filtres */}
+      {condition.dimension_filters && Object.keys(condition.dimension_filters).length > 0 && (
+        <>
+          <div className="section-divider">
+            <span className="label">Filtres</span>
+            <div className="line" />
+          </div>
+          <div className="filter-row-group">
+            {Object.entries(condition.dimension_filters).map(([k, v]) => (
+              <div key={k} className="filter-row">
+                <span className="dropdown" style={{minWidth:100}}>
+                  <span>{k}</span>
+                  <IconChevron />
+                </span>
+                <span className="op-tag">Égal à <IconChevron /></span>
+                <span className="data-tag"><IconDatabase /> {v}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {/* Seuil */}
+      <div className="section-divider">
+        <span className="label">Seuil</span>
+        <div className="line" />
+      </div>
+      <div className="filter-row-group">
+        <div className="filter-row">
+          <span className="dropdown" style={{minWidth:80}}>
+            <span>{measureLabel}</span>
+            <IconChevron />
+          </span>
+          <span className={"op-tag"+(condition.negated ? " negated" : "")}>
+            {condition.negated ? "Aucun(e)" : opLabel}
+            <IconChevron />
+          </span>
+          {!condition.negated && (
+            <span className="data-tag">
+              <IconDatabase />
+              {valueStr}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+function LogicDivider({ logic }) {
+  const isOr = logic === "OR";
+  return (
+    <div className="logic-divider">
+      <div className="line" />
+      <span className="logic-badge primary">
+        {isOr ? "OU" : "ET"}
+        <IconChevron />
+      </span>
+      <div className="line" />
+    </div>
+  );
+}
+function JsonHighlight({ obj }) {
+  function render(o, indent) {
+    const pad = "  ".repeat(indent);
+    if (o === null || o === undefined) return <span className="json-bool">null</span>;
+    if (typeof o === "boolean") return <span className="json-bool">{String(o)}</span>;
+    if (typeof o === "number") return <span className="json-num">{o}</span>;
+    if (typeof o === "string") return <span className="json-str">"{o}"</span>;
+    if (Array.isArray(o)) {
+      if (!o.length) return <span>{"[]"}</span>;
+      return <span>{"[\n"}{o.map((v,i) => <span key={i}>{pad}  {render(v,indent+1)}{i<o.length-1?",":""}{"\n"}</span>)}{pad}{"]"}</span>;
+    }
+    if (typeof o === "object") {
+      const entries = Object.entries(o);
+      if (!entries.length) return <span>{"{}"}</span>;
+      return <span>{"{\n"}{entries.map(([k,v],i) => <span key={k}>{pad}  <span className="json-key">"{k}"</span>{": "}{render(v,indent+1)}{i<entries.length-1?",":""}{"\n"}</span>)}{pad}{"}"}</span>;
+    }
+    return String(o);
+  }
+  return <div className="json-panel"><pre>{render(obj, 0)}</pre></div>;
+}
+function TracePanel({ trace }) {
+  return (
+    <table className="trace-table">
+      <thead><tr><th>Étape</th><th>Résultat</th></tr></thead>
+      <tbody>
+        {trace.map((row, i) => (
+          <tr key={i}><td>{row.step}</td><td>{row.result}</td></tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+function ConcordanceModal({ onClose }) {
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="concordance-modal" onClick={e => e.stopPropagation()}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+          <h2 style={{fontSize:16,fontWeight:600,color:'var(--text-primary)'}}>Table de concordance</h2>
+          <button onClick={onClose} className="modal-close"><IconClose /></button>
+        </div>
+        <p style={{fontSize:12,color:'var(--text-secondary)',marginBottom:16}}>Toutes les expressions françaises reconnues par le parser et leur mapping.</p>
+        <div style={{display:'flex',flexDirection:'column',gap:16}}>
+          {Object.entries(CONCORDANCE_MAP).map(([cat, items]) => (
+            <div key={cat}>
+              <div style={{fontSize:13,fontWeight:600,color:'var(--text-primary)',marginBottom:6,paddingBottom:4,borderBottom:'1px solid var(--border-default)'}}>{cat}</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+                {items.map((item, i) => (
+                  <span key={i} className="concordance-tag">{item}</span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{marginTop:24,textAlign:'right'}}>
+          <button onClick={onClose} className="btn-primary" style={{flex:'none',padding:'8px 20px'}}>Fermer</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function SchemaSidebar({ selectedRollup }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="sidebar-card">
+      <div className="sidebar-card-header" onClick={() => setOpen(o => !o)}>
+        <span>Rollups disponibles</span>
+        <span style={{fontSize:10,color:'var(--text-muted)'}}>{open ? "▲" : "▼"}</span>
+      </div>
+      {open && (
+        <div className="sidebar-card-body">
+          {Object.entries(ROLLUPS).map(([key, r]) => (
+            <div key={key} className={"rollup-item"+(selectedRollup===key?" active":"")}>
+              <div className="name">{r.icon} {r.label}</div>
+              <div className="key">{key}</div>
+              {Object.keys(r.measures||{}).length > 0 && (
+                <div className="measures">
+                  {Object.entries(r.measures).map(([mk,mv]) => (
+                    <span key={mk} className="measure-tag">{mv.label}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+/* =============================================================
+   APP
+============================================================= */
+function App() {
+  const [input, setInput] = useState("");
+  const [result, setResult] = useState(null);
+  const [activeTab, setActiveTab] = useState("segment");
+  const [showConcordance, setShowConcordance] = useState(false);
+  const [apiKey, setApiKey] = useState("");
+  const [mode, setMode] = useState("rules");
+  const [isLoading, setIsLoading] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
+  const runWithText = useCallback(async (text) => {
+    if (!text.trim()) return;
+    if (mode === "rules") {
+      setResult(parseCompoundPrompt(text));
+      setAiResult(null);
+      setActiveTab("segment");
+      return;
+    }
+    if (mode === "ai") {
+      if (!apiKey.trim()) {
+        setResult({
+          success: false,
+          errors: ["Clé API Anthropic requise pour le mode Claude IA."],
+          warnings: [], raw: text, trace: [], segment: null,
+        });
+        setAiResult(null);
+        setActiveTab("segment");
+        return;
+      }
+      setResult(null); setAiResult(null); setIsLoading(true);
+      try {
+        const r = await callClaudeAPI(text, apiKey.trim());
+        setAiResult({ segment: r.segment, raw: r.raw, error: null });
+        setResult({
+          success: true, errors: [], warnings: [], raw: text,
+          trace: [{ step: "Mode", result: "Interprétation Claude IA" }],
+          isCompound: (r.segment.conditions?.length || 0) > 1,
+          logic: r.segment.logic || "AND",
+          segment: r.segment,
+        });
+      } catch (e) {
+        setAiResult({ segment: null, raw: null, error: e.message });
+        setResult({
+          success: false, errors: [e.message], warnings: [],
+          raw: text, trace: [], segment: null,
+        });
+      } finally { setIsLoading(false); }
+      setActiveTab("segment");
+      return;
+    }
+    // Hybrid
+    const rulesResult = parseCompoundPrompt(text);
+    setResult(rulesResult); setAiResult(null); setActiveTab("segment");
+    if (apiKey.trim()) {
+      setIsLoading(true);
+      try {
+        const r = await callClaudeAPI(text, apiKey.trim());
+        setAiResult({ segment: r.segment, raw: r.raw, error: null });
+      } catch (e) {
+        setAiResult({ segment: null, raw: null, error: e.message });
+      } finally { setIsLoading(false); }
+    }
+  }, [mode, apiKey]);
+  const run = useCallback(() => runWithText(input), [input, runWithText]);
+  const handleKey = e => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") run(); };
+  const loadExample = ex => { setInput(ex); runWithText(ex); };
+  const selectedRollup = result?.segment?.conditions?.[0]?.rollup || null;
+  const segmentLogic = result?.segment?.logic || "AND";
+  const segmentTitle = input.trim() ? input.trim() : "Nouveau segment";
+  const tabs = [
+    { key: "segment", label: "Segment" },
+    { key: "json", label: "JSON" },
+    { key: "trace", label: "Trace" },
+    ...(aiResult ? [{ key: "ai", label: "Claude IA" }] : []),
+  ];
+  return (
+    <div className="app-layout">
+      {showConcordance && <ConcordanceModal onClose={() => setShowConcordance(false)} />}
+      {/* Main column */}
+      <div style={{display:'flex',flexDirection:'column',gap:16}}>
+        {/* Modal */}
+        <div className="modal">
+          {/* Header */}
+          <div className="modal-header">
+            <h1>Segment : {segmentTitle.length > 40 ? segmentTitle.slice(0,40)+"…" : segmentTitle}</h1>
+            <button className="modal-close" onClick={() => setShowConcordance(true)} title="Table de concordance">
+              <svg viewBox="0 0 14 14" style={{width:14,height:14,stroke:'var(--text-muted)',strokeWidth:1.5,fill:'none'}}>
+                <circle cx="7" cy="7" r="6"/><path d="M7 4v4M7 10v.5"/>
+              </svg>
+            </button>
+          </div>
+          {/* Body */}
+          <div className="modal-body">
+            {/* Mode toggle */}
+            <div className="mode-bar">
+              <span className="mode-label">Mode</span>
+              {[
+                { key: "rules", label: "Règles" },
+                { key: "ai", label: "Claude IA" },
+                { key: "hybrid", label: "Hybride" },
+              ].map(m => (
+                <button
+                  key={m.key}
+                  onClick={() => { setMode(m.key); setAiResult(null); }}
+                  className={"mode-chip"+(mode === m.key ? " active" : "")}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            {/* API key */}
+            {mode !== "rules" && (
+              <div className="api-bar">
+                <label>API Key :</label>
+                <input
+                  type="password"
+                  placeholder="sk-ant-api03-..."
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                />
+                <span>non stockée</span>
+              </div>
+            )}
+            {/* Prompt input */}
+            <div>
+              <div className="field-label">Description du segment</div>
+              <textarea
+                className="prompt-textarea"
+                rows={3}
+                placeholder='Ex: "Clients ayant acheté 3 fois ET complété au moins 2 missions"'
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={handleKey}
+              />
+              <div className="field-help">
+                <span>Ctrl+Entrée pour parser</span>
+                <span>{input.length}/500</span>
+              </div>
+            </div>
+            {/* Filter section — results */}
+            {(result || isLoading) && (
+              <div className="filter-section">
+                <div className="filter-header">
+                  <div className="filter-icon"><IconFilter /></div>
+                  <div className="filter-header-text">
+                    <h2>Règles de ciblage</h2>
+                    <p>Résultat de l'interprétation du prompt</p>
+                  </div>
+                </div>
+                {/* Status badges */}
+                {result && (
+                  <div className="status-badges">
+                    {result.success
+                      ? <span className="status-badge success">Parsing réussi</span>
+                      : <span className="status-badge error">Échec</span>}
+                    {result.isCompound && (
+                      <span className="status-badge info">
+                        {segmentLogic} — {result.segment?.conditions?.length || 0} conditions
+                      </span>
+                    )}
+                    {mode !== "rules" && (
+                      <span className="status-badge info">
+                        {mode === "ai" ? "Claude IA" : "Hybride"}
+                      </span>
+                    )}
+                    {isLoading && (
+                      <span className="status-badge warning">
+                        <span className="spinner" style={{width:10,height:10,borderWidth:1.5}} /> Claude IA…
+                      </span>
+                    )}
+                    {result.errors?.map((e,i) => <span key={i} className="status-badge error">{e}</span>)}
+                    {result.warnings?.map((w,i) => <span key={i} className="status-badge warning">{w}</span>)}
+                  </div>
+                )}
+                {isLoading && !result && (
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:12,padding:'32px 0',color:'var(--text-muted)'}}>
+                    <span className="spinner" style={{width:20,height:20,borderWidth:3}} />
+                    <span style={{fontSize:13}}>Claude IA interprète le prompt…</span>
+                  </div>
+                )}
+                {/* Tabs */}
+                <div className="result-wrapper">
+                  <div className="result-tabs">
+                    {tabs.map(tab => (
+                      <button
+                        key={tab.key}
+                        onClick={() => setActiveTab(tab.key)}
+                        className={"result-tab"+(activeTab === tab.key ? " active" : "")}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="result-content">
+                    {/* Segment tab */}
+                    {activeTab === "segment" && result?.segment && (
+                      <div style={{display:'flex',flexDirection:'column',gap:0}}>
+                        {result.segment.conditions.map((c, i) => (
+                          <React.Fragment key={i}>
+                            {i > 0 && <LogicDivider logic={segmentLogic} />}
+                            <ConditionCard condition={c} index={i} />
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    )}
+                    {/* JSON tab */}
+                    {activeTab === "json" && result?.segment && <JsonHighlight obj={result.segment} />}
+                    {/* Trace tab */}
+                    {activeTab === "trace" && (
+                      mode === "ai" ? (
+                        <div style={{textAlign:'center',padding:24,color:'var(--text-muted)',fontSize:13}}>
+                          Mode Claude IA — trace pas à pas non disponible.
+                          <div style={{fontSize:11,marginTop:4}}>Passez en mode Hybride pour voir la trace.</div>
+                        </div>
+                      ) : result?.trace ? (
+                        <TracePanel trace={result.trace} />
+                      ) : null
+                    )}
+                    {/* AI tab */}
+                    {activeTab === "ai" && (
+                      <div>
+                        {isLoading && (
+                          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:12,padding:'32px 0',color:'var(--text-muted)'}}>
+                            <span className="spinner" style={{width:20,height:20,borderWidth:3}} />
+                            <span style={{fontSize:13}}>Claude IA interprète…</span>
+                          </div>
+                        )}
+                        {!isLoading && aiResult?.error && (
+                          <div style={{background:'#fef2f2',color:'var(--red-delete)',borderRadius:8,padding:12,fontSize:13,border:'1px solid #fecaca'}}>
+                            <strong>Erreur :</strong> {aiResult.error}
+                          </div>
+                        )}
+                        {!isLoading && aiResult?.segment && (
+                          <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                            <div className="status-badges">
+                              <span className="status-badge info">Interprétation Claude</span>
+                              <span className="status-badge" style={{background:'var(--bg-tab-inactive)',color:'var(--text-secondary)'}}>claude-haiku-4-5</span>
+                              {mode === "hybrid" && result && (
+                                <span className={"status-badge "+(
+                                  aiResult.segment.conditions?.length === result.segment?.conditions?.length
+                                    ? "success" : "warning"
+                                )}>
+                                  {aiResult.segment.conditions?.length === result.segment?.conditions?.length
+                                    ? "Accord avec les règles"
+                                    : "Divergence avec les règles"}
+                                </span>
+                              )}
+                            </div>
+                            {aiResult.segment.conditions?.map((c, i) => (
+                              <React.Fragment key={i}>
+                                {i > 0 && <LogicDivider logic={aiResult.segment.logic || "AND"} />}
+                                <ConditionCard condition={c} index={i} />
+                              </React.Fragment>
+                            ))}
+                            <div style={{marginTop:8}}>
+                              <div style={{fontSize:11,fontWeight:600,color:'var(--text-secondary)',marginBottom:6}}>JSON brut Claude :</div>
+                              <JsonHighlight obj={aiResult.segment} />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          {/* Footer */}
+          <div className="modal-footer">
+            <button className="btn-secondary" onClick={() => setShowConcordance(true)}>
+              Concordance
+            </button>
+            <button
+              className="btn-primary"
+              onClick={run}
+              disabled={!input.trim() || isLoading}
+            >
+              {isLoading ? "En cours…" : "Créer"}
+            </button>
+          </div>
+        </div>
+        {/* Examples */}
+        <div className="examples-section" style={{background:'var(--bg-card)',borderRadius:'var(--radius-card)',border:'1px solid var(--border-card)',padding:16}}>
+          <div className="section-label">Exemples de prompts</div>
+          <div className="examples-grid">
+            {EXAMPLES.map((ex, i) => (
+              <button key={i} onClick={() => loadExample(ex)} disabled={isLoading} className="example-chip">
+                {ex}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      {/* Sidebar */}
+      <div className="sidebar">
+        <SchemaSidebar selectedRollup={selectedRollup} />
+        <div className="sidebar-card">
+          <div className="sidebar-card-header">Modes d'interprétation</div>
+          <div className="tips-card">
+            <p><strong>Règles</strong> — Parser regex déterministe. Rapide, prévisible.</p>
+            <p><strong>Claude IA</strong> — NL complet par claude-haiku. Comprend les formulations ambiguës.</p>
+            <p><strong>Hybride</strong> — Les deux en parallèle. Comparez dans l'onglet Claude IA.</p>
+          </div>
+        </div>
+        <div className="sidebar-card">
+          <div className="sidebar-card-header">Astuces</div>
+          <div className="tips-card">
+            <p><strong>ET</strong> : "ayant X ET ayant Y" → AND</p>
+            <p><strong>OU</strong> : "ayant X OU ayant Y" → OR</p>
+            <p><strong>Nombres</strong> : "deux", "trois", "plusieurs"</p>
+            <p><strong>Temps</strong> : hier, ce mois-ci, en janvier…</p>
+            <p><strong>Exclusion</strong> : "sans commande", "jamais"</p>
+            <p><strong>Fourchette</strong> : "entre 2 et 5"</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>

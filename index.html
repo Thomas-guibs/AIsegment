@@ -726,7 +726,7 @@ Format relatif : { "type": "relative_last", "value": N, "unit": "days"|"weeks"|"
 Format courant : { "type": "relative_current", "value": 1, "unit": "weeks"|"months"|"years" }
 Format absolu mois : { "type": "absolute_month", "value": N_du_mois_1_à_12, "unit": "month" }
 ## Format de sortie
-Réponds UNIQUEMENT avec du JSON valide, sans markdown, sans explication.
+IMPORTANT : Réponds UNIQUEMENT avec du JSON valide, sans markdown, sans backticks, sans commentaires, sans explication. Pas de \`\`\`json ni de //.
 {
   "version": "1.0",
   "logic": "AND",
@@ -761,9 +761,16 @@ async function callClaudeAPI(text, apiKey) {
   }
   const data = await response.json();
   const rawText = (data.content?.[0]?.text || "").trim();
-  const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+  // Strip markdown fences if present
+  let cleaned = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/,"").trim();
+  // Extract outermost JSON object
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("Réponse inattendue de Claude : "+rawText.slice(0, 120));
-  return { segment: JSON.parse(jsonMatch[0]), raw: rawText };
+  // Remove trailing commas before } or ] (common LLM mistake)
+  let jsonStr = jsonMatch[0].replace(/,\s*([}\]])/g, "$1");
+  // Remove single-line comments (// ...) that LLMs sometimes add
+  jsonStr = jsonStr.replace(/\/\/[^\n]*/g, "");
+  return { segment: JSON.parse(jsonStr), raw: rawText };
 }
 /* =============================================================
    SVG ICONS

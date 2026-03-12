@@ -309,6 +309,115 @@ const ROLLUPS = {
   },
 };
 /* =============================================================
+   DSL MEASURE MAPPINGS
+============================================================= */
+const MEASURE_DSL = {
+  completed_orders: {
+    count: { name: "mea_order_id_dcount", aggregation: "max" },
+    order_total_price: { name: "mea_amount_sum", aggregation: "max" },
+    order_items_count: { name: "mea_items_count_sum", aggregation: "max" },
+    order_currency: { name: "mea_currency", aggregation: "max" },
+  },
+  customer_properties: {
+    customer_age: { name: "mea_age", aggregation: "max" },
+    customer_country: { name: "dim_country", aggregation: "max" },
+    customer_gender: { name: "dim_gender", aggregation: "max" },
+    customer_tag: { name: "dim_tag", aggregation: "max" },
+  },
+  completed_mission: {
+    count: { name: "mea_mission_id_dcount", aggregation: "max" },
+    mission_type: { name: "dim_mission_type", aggregation: "max" },
+    mission_points: { name: "mea_points_sum", aggregation: "max" },
+  },
+  points_transaction: {
+    points_amount: { name: "mea_points_sum", aggregation: "max" },
+    transaction_type: { name: "dim_transaction_type", aggregation: "max" },
+  },
+  referral_completed_godfather: {
+    count: { name: "mea_referral_id_dcount", aggregation: "max" },
+  },
+  referral_completed_godson: {
+    count: { name: "mea_referral_id_dcount", aggregation: "max" },
+  },
+  reward_used: {
+    count: { name: "mea_reward_id_dcount", aggregation: "max" },
+    reward_type: { name: "dim_reward_type", aggregation: "max" },
+  },
+  reward_obtained: {
+    count: { name: "mea_reward_id_dcount", aggregation: "max" },
+    reward_type: { name: "dim_reward_type", aggregation: "max" },
+  },
+};
+function timeWindowToWhere(tw) {
+  const today = new Date();
+  const fmt = d => d.toISOString().slice(0, 10);
+  if (tw.type === "relative_last") {
+    const start = new Date(today);
+    if (tw.unit === "days") start.setDate(start.getDate() - tw.value);
+    else if (tw.unit === "weeks") start.setDate(start.getDate() - tw.value * 7);
+    else if (tw.unit === "months") start.setMonth(start.getMonth() - tw.value);
+    else if (tw.unit === "years") start.setFullYear(start.getFullYear() - tw.value);
+    return { field: "rollup_date", operator: "between", value: [fmt(start), fmt(today)] };
+  }
+  if (tw.type === "relative_current") {
+    if (tw.unit === "weeks") {
+      const start = new Date(today);
+      const day = start.getDay();
+      start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+      const end = new Date(start);
+      end.setDate(end.getDate() + 6);
+      return { field: "rollup_date", operator: "between", value: [fmt(start), fmt(end)] };
+    }
+    if (tw.unit === "months") {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      const end = new Date(today.getFullYear(), today.getMonth() + tw.value, 0);
+      return { field: "rollup_date", operator: "between", value: [fmt(start), fmt(end)] };
+    }
+    if (tw.unit === "years") {
+      const start = new Date(today.getFullYear(), 0, 1);
+      const end = new Date(today.getFullYear(), 11, 31);
+      return { field: "rollup_date", operator: "between", value: [fmt(start), fmt(end)] };
+    }
+  }
+  if (tw.type === "absolute_month") {
+    const year = today.getFullYear();
+    const start = new Date(year, tw.value - 1, 1);
+    const end = new Date(year, tw.value, 0);
+    return { field: "rollup_date", operator: "between", value: [fmt(start), fmt(end)] };
+  }
+  if (tw.type === "absolute") {
+    if (tw.start && tw.end) return { field: "rollup_date", operator: "between", value: [tw.start, tw.end] };
+    if (tw.start) return { field: "rollup_date", operator: "gte", value: tw.start };
+  }
+  return null;
+}
+function buildDSLQuery(rollupKey, measure, operator, value, betweenVals, timeWindow, isNegated, dimensionFilters) {
+  const dslMeasure = MEASURE_DSL[rollupKey]?.[measure] || { name: "mea_" + rollupKey + "_dcount", aggregation: "max" };
+  const query = { rollup: rollupKey };
+  query.select = { measures: [{ name: dslMeasure.name, aggregation: dslMeasure.aggregation }] };
+  const where = [];
+  if (timeWindow) {
+    const tw = timeWindowToWhere(timeWindow);
+    if (tw) where.push(tw);
+  }
+  if (dimensionFilters) {
+    for (const [k, v] of Object.entries(dimensionFilters)) {
+      where.push({ field: "dim_" + k, operator: "eq", value: v });
+    }
+  }
+  if (where.length > 0) query.where = where;
+  const having = [];
+  if (isNegated) {
+    having.push({ field: dslMeasure.name, operator: "eq", value: 0 });
+  } else if (operator === "between" && betweenVals) {
+    having.push({ field: dslMeasure.name, operator: "between", value: [betweenVals[0], betweenVals[1]] });
+  } else {
+    having.push({ field: dslMeasure.name, operator: operator, value: value });
+  }
+  query.having = having;
+  return query;
+}
+/* =============================================================
    CONCORDANCE MAP
 ============================================================= */
 const CONCORDANCE_MAP = {
@@ -651,19 +760,10 @@ function parsePrompt(text) {
     trace.push({ step: "Filtres dimension", result: JSON.stringify(dimensionFilters) });
   }
   if (!rollupKey) return { success: false, errors, warnings, raw: text, trace, segment: null };
-  const condition = {
-    rollup: rollupKey,
-    ...(effectiveMeasure !== "count" ? { measure: effectiveMeasure } : {}),
-    operator,
-    value,
-    ...(betweenVals ? { value_max: betweenVals[1] } : {}),
-    ...(timeWindow ? { time_window: timeWindow } : {}),
-    ...(isNegated ? { negated: true } : {}),
-    ...(Object.keys(dimensionFilters).length > 0 ? { dimension_filters: dimensionFilters } : {}),
-  };
+  const query = buildDSLQuery(rollupKey, effectiveMeasure, operator, value, betweenVals, timeWindow, isNegated, dimensionFilters);
   return {
     success: true, errors, warnings, raw: text, trace,
-    segment: { version: "1.0", logic: "AND", conditions: [condition] },
+    segment: { operator: "and", queries: [query] },
   };
 }
 function parseCompoundPrompt(text) {
@@ -682,7 +782,7 @@ function parseCompoundPrompt(text) {
   const validResults = subResults.filter(r => r.success);
   if (validResults.length === 0) return { ...parsePrompt(text), isCompound: false, logic };
   if (validResults.length === 1) return { ...validResults[0], isCompound: false, logic };
-  const allConditions = validResults.flatMap(r => r.segment.conditions);
+  const allQueries = validResults.flatMap(r => r.segment.queries);
   const allWarnings = subResults.flatMap(r => r.warnings);
   const allErrors = subResults.filter(r => !r.success).flatMap(r => r.errors);
   const combinedTrace = [
@@ -696,14 +796,14 @@ function parseCompoundPrompt(text) {
     success: true, errors: allErrors, warnings: allWarnings,
     raw: text, trace: combinedTrace, isCompound: true, logic,
     clauseParts: parts,
-    segment: { version: "1.0", logic, conditions: allConditions },
+    segment: { operator: logic.toLowerCase(), queries: allQueries },
   };
 }
 /* =============================================================
    CLAUDE AI INTEGRATION
 ============================================================= */
 const CLAUDE_SYSTEM_PROMPT = `Tu es un moteur de segmentation pour Loyoly, une plateforme de fidélité e-commerce.
-Tu reçois une description en langage naturel (français) d'un segment de clients et tu dois la convertir en un objet JSON structuré.
+Tu reçois une description en langage naturel (français) d'un segment de clients et tu dois la convertir en un objet JSON DSL structuré.
 ## Rollups disponibles (type d'action client)
 - completed_orders : commandes passées (acheté, commandé, achat, purchase, converti, panier...)
 - customer_properties : propriétés client (pays, âge, genre, tags, VIP, inscrit...)
@@ -713,29 +813,50 @@ Tu reçois une description en langage naturel (français) d'un segment de client
 - referral_completed_godson : parrainages en tant que filleul (filleul, a été parrainé, code parrainage...)
 - reward_used : récompenses utilisées (récompense utilisée, bon de réduction, coupon utilisé, redeem...)
 - reward_obtained : récompenses/badges obtenus (récompense obtenue, badge, niveau atteint, débloqué...)
-## Opérateurs disponibles
-- "gte" : au moins, minimum, au minimum, plus de
+## Mesures DSL par rollup
+- completed_orders: mea_order_id_dcount (count), mea_amount_sum (montant total), mea_items_count_sum (nb articles)
+- customer_properties: mea_age (âge), dim_country (pays), dim_gender (genre), dim_tag (tag)
+- completed_mission: mea_mission_id_dcount (count), mea_points_sum (points mission)
+- points_transaction: mea_points_sum (montant points)
+- referral_completed_godfather: mea_referral_id_dcount (count)
+- referral_completed_godson: mea_referral_id_dcount (count)
+- reward_used: mea_reward_id_dcount (count)
+- reward_obtained: mea_reward_id_dcount (count)
+## Opérateurs disponibles (pour where et having)
+- "gte" : au moins, minimum, plus de
 - "gt" : strictement plus de, au-delà de
 - "lte" : au plus, maximum, pas plus de
-- "lt" : moins de, strictement moins, inférieur à
+- "lt" : moins de, strictement moins
 - "eq" : exactement, juste, pile
-- "between" : entre X et Y, compris entre
-Pour une négation (sans, jamais, n'ayant pas, aucune), utilise operator "eq" et value 0 avec negated: true.
-## Fenêtres temporelles (time_window)
-Format relatif : { "type": "relative_last", "value": N, "unit": "days"|"weeks"|"months"|"years" }
-Format courant : { "type": "relative_current", "value": 1, "unit": "weeks"|"months"|"years" }
-Format absolu mois : { "type": "absolute_month", "value": N_du_mois_1_à_12, "unit": "month" }
+- "between" : entre X et Y (value est un tableau [min, max])
+- "is_not_null" : existe (value: null)
+Pour une négation (sans, jamais, n'ayant pas), utilise operator "eq" et value 0 dans having.
+## Structure DSL
+- "operator" (niveau racine) : "and" ou "or" (minuscules)
+- "queries" : tableau de requêtes
+- Chaque requête contient :
+  - "rollup" : le type de rollup
+  - "select" : { "measures": [{ "name": "mea_xxx", "aggregation": "max" }] }
+  - "where" (optionnel) : filtres pré-agrégation [{ "field": "...", "operator": "...", "value": ... }]
+    - Dates : { "field": "rollup_date", "operator": "between", "value": ["YYYY-MM-DD", "YYYY-MM-DD"] }
+    - Dimensions : { "field": "dim_xxx", "operator": "eq", "value": "..." }
+  - "having" : filtres post-agrégation [{ "field": "mea_xxx", "operator": "...", "value": ... }]
 ## Format de sortie
 IMPORTANT : Réponds UNIQUEMENT avec du JSON valide, sans markdown, sans backticks, sans commentaires, sans explication. Pas de \`\`\`json ni de //.
 {
-  "version": "1.0",
-  "logic": "AND",
-  "conditions": [
+  "operator": "and",
+  "queries": [
     {
       "rollup": "completed_orders",
-      "operator": "gte",
-      "value": 3,
-      "time_window": { "type": "relative_current", "value": 1, "unit": "months" }
+      "select": {
+        "measures": [{ "name": "mea_order_id_dcount", "aggregation": "max" }]
+      },
+      "where": [
+        { "field": "rollup_date", "operator": "between", "value": ["2026-03-01", "2026-03-31"] }
+      ],
+      "having": [
+        { "field": "mea_order_id_dcount", "operator": "gte", "value": 3 }
+      ]
     }
   ]
 }`;
@@ -785,15 +906,24 @@ const IconDatabase = () => <svg viewBox="0 0 14 14" style={{width:14,height:14,s
 /* =============================================================
    UI COMPONENTS
 ============================================================= */
-function ConditionCard({ condition, index }) {
-  const rollup = ROLLUPS[condition.rollup];
-  const measureLabel = condition.measure
-    ? (rollup?.measures?.[condition.measure]?.label || condition.measure)
-    : (rollup?.label || condition.rollup);
-  const opLabel = OP_LABELS[condition.operator] || condition.operator;
-  const valueStr = condition.operator === "between"
-    ? condition.value+" – "+condition.value_max
-    : String(condition.value);
+function ConditionCard({ query, index }) {
+  const rollup = ROLLUPS[query.rollup];
+  const measure = query.select?.measures?.[0];
+  const measureName = measure?.name || "count";
+  const measureLabel = rollup?.label || query.rollup;
+  const dateFilter = query.where?.find(w => w.field === "rollup_date");
+  const dimFilters = (query.where || []).filter(w => w.field !== "rollup_date");
+  const havingClause = query.having?.[0];
+  const isNegated = havingClause?.operator === "eq" && havingClause?.value === 0;
+  const opLabel = havingClause ? (OP_LABELS[havingClause.operator] || havingClause.operator) : "";
+  const valueStr = havingClause?.operator === "between" && Array.isArray(havingClause.value)
+    ? havingClause.value[0]+" – "+havingClause.value[1]
+    : String(havingClause?.value ?? "");
+  const dateLabel = dateFilter
+    ? (Array.isArray(dateFilter.value)
+      ? "du "+dateFilter.value[0]+" au "+dateFilter.value[1]
+      : dateFilter.operator+" "+dateFilter.value)
+    : null;
   return (
     <div className="rule-card">
       <div className="rule-top">
@@ -804,10 +934,10 @@ function ConditionCard({ condition, index }) {
       </div>
       {/* Tabs */}
       <div className="tabs-pill">
-        <button className={"tab-item"+(condition.rollup !== "customer_properties" ? " active" : "")}>
+        <button className={"tab-item"+(query.rollup !== "customer_properties" ? " active" : "")}>
           Comportements
         </button>
-        <button className={"tab-item"+(condition.rollup === "customer_properties" ? " active" : "")}>
+        <button className={"tab-item"+(query.rollup === "customer_properties" ? " active" : "")}>
           Profil client
         </button>
       </div>
@@ -815,78 +945,86 @@ function ConditionCard({ condition, index }) {
       <div className="filter-row" style={{gap:12}}>
         <span className="section-label">Basé sur</span>
         <span className="dropdown">
-          <span>{rollup?.icon} {rollup?.label || condition.rollup}</span>
+          <span>{rollup?.icon} {rollup?.label || query.rollup}</span>
           <IconChevron />
         </span>
       </div>
       {/* Période */}
-      {condition.time_window && (
-        <div className="filter-row" style={{gap:12}}>
-          <span className="section-label">Période</span>
-          <span className="dropdown">
-            <span>{condition.time_window.label || JSON.stringify(condition.time_window)}</span>
-            <IconChevron />
-          </span>
-        </div>
-      )}
-      {!condition.time_window && (
-        <div className="filter-row" style={{gap:12}}>
-          <span className="section-label">Période</span>
-          <span className="dropdown">
-            <span>Toutes dates</span>
-            <IconChevron />
-          </span>
-        </div>
-      )}
-      {/* Filtres */}
-      {condition.dimension_filters && Object.keys(condition.dimension_filters).length > 0 && (
+      <div className="filter-row" style={{gap:12}}>
+        <span className="section-label">Période</span>
+        <span className="dropdown">
+          <span>{dateLabel || "Toutes dates"}</span>
+          <IconChevron />
+        </span>
+      </div>
+      {/* Where filters (dimensions) */}
+      {dimFilters.length > 0 && (
         <>
           <div className="section-divider">
-            <span className="label">Filtres</span>
+            <span className="label">Where</span>
             <div className="line" />
           </div>
           <div className="filter-row-group">
-            {Object.entries(condition.dimension_filters).map(([k, v]) => (
-              <div key={k} className="filter-row">
+            {dimFilters.map((f, i) => (
+              <div key={i} className="filter-row">
                 <span className="dropdown" style={{minWidth:100}}>
-                  <span>{k}</span>
+                  <span>{f.field}</span>
                   <IconChevron />
                 </span>
-                <span className="op-tag">Égal à <IconChevron /></span>
-                <span className="data-tag"><IconDatabase /> {v}</span>
+                <span className="op-tag">{OP_LABELS[f.operator] || f.operator} <IconChevron /></span>
+                <span className="data-tag"><IconDatabase /> {String(f.value)}</span>
               </div>
             ))}
           </div>
         </>
       )}
-      {/* Seuil */}
-      <div className="section-divider">
-        <span className="label">Seuil</span>
-        <div className="line" />
-      </div>
-      <div className="filter-row-group">
-        <div className="filter-row">
-          <span className="dropdown" style={{minWidth:80}}>
-            <span>{measureLabel}</span>
-            <IconChevron />
-          </span>
-          <span className={"op-tag"+(condition.negated ? " negated" : "")}>
-            {condition.negated ? "Aucun(e)" : opLabel}
-            <IconChevron />
-          </span>
-          {!condition.negated && (
-            <span className="data-tag">
-              <IconDatabase />
-              {valueStr}
-            </span>
-          )}
-        </div>
-      </div>
+      {/* Select (measure) */}
+      {measure && (
+        <>
+          <div className="section-divider">
+            <span className="label">Select</span>
+            <div className="line" />
+          </div>
+          <div className="filter-row-group">
+            <div className="filter-row">
+              <span className="data-tag"><IconDatabase /> {measure.name}</span>
+              <span className="op-tag">{measure.aggregation}</span>
+            </div>
+          </div>
+        </>
+      )}
+      {/* Having (seuil) */}
+      {havingClause && (
+        <>
+          <div className="section-divider">
+            <span className="label">Having</span>
+            <div className="line" />
+          </div>
+          <div className="filter-row-group">
+            <div className="filter-row">
+              <span className="dropdown" style={{minWidth:80}}>
+                <span>{havingClause.field}</span>
+                <IconChevron />
+              </span>
+              <span className={"op-tag"+(isNegated ? " negated" : "")}>
+                {isNegated ? "Aucun(e)" : opLabel}
+                <IconChevron />
+              </span>
+              {!isNegated && (
+                <span className="data-tag">
+                  <IconDatabase />
+                  {valueStr}
+                </span>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 function LogicDivider({ logic }) {
-  const isOr = logic === "OR";
+  const isOr = logic === "OR" || logic === "or";
   return (
     <div className="logic-divider">
       <div className="line" />
@@ -1024,8 +1162,8 @@ function App() {
         setResult({
           success: true, errors: [], warnings: [], raw: text,
           trace: [{ step: "Mode", result: "Interprétation Claude IA" }],
-          isCompound: (r.segment.conditions?.length || 0) > 1,
-          logic: r.segment.logic || "AND",
+          isCompound: (r.segment.queries?.length || 0) > 1,
+          logic: r.segment.operator || "and",
           segment: r.segment,
         });
       } catch (e) {
@@ -1054,8 +1192,8 @@ function App() {
   const run = useCallback(() => runWithText(input), [input, runWithText]);
   const handleKey = e => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") run(); };
   const loadExample = ex => { setInput(ex); runWithText(ex); };
-  const selectedRollup = result?.segment?.conditions?.[0]?.rollup || null;
-  const segmentLogic = result?.segment?.logic || "AND";
+  const selectedRollup = result?.segment?.queries?.[0]?.rollup || null;
+  const segmentLogic = result?.segment?.operator || "and";
   const segmentTitle = input.trim() ? input.trim() : "Nouveau segment";
   const tabs = [
     { key: "segment", label: "Segment" },
@@ -1145,7 +1283,7 @@ function App() {
                       : <span className="status-badge error">Échec</span>}
                     {result.isCompound && (
                       <span className="status-badge info">
-                        {segmentLogic} — {result.segment?.conditions?.length || 0} conditions
+                        {segmentLogic} — {result.segment?.queries?.length || 0} queries
                       </span>
                     )}
                     {mode !== "rules" && (
@@ -1185,10 +1323,10 @@ function App() {
                     {/* Segment tab */}
                     {activeTab === "segment" && result?.segment && (
                       <div style={{display:'flex',flexDirection:'column',gap:0}}>
-                        {result.segment.conditions.map((c, i) => (
+                        {result.segment.queries.map((q, i) => (
                           <React.Fragment key={i}>
                             {i > 0 && <LogicDivider logic={segmentLogic} />}
-                            <ConditionCard condition={c} index={i} />
+                            <ConditionCard query={q} index={i} />
                           </React.Fragment>
                         ))}
                       </div>
@@ -1227,19 +1365,19 @@ function App() {
                               <span className="status-badge" style={{background:'var(--bg-tab-inactive)',color:'var(--text-secondary)'}}>claude-haiku-4-5</span>
                               {mode === "hybrid" && result && (
                                 <span className={"status-badge "+(
-                                  aiResult.segment.conditions?.length === result.segment?.conditions?.length
+                                  aiResult.segment.queries?.length === result.segment?.queries?.length
                                     ? "success" : "warning"
                                 )}>
-                                  {aiResult.segment.conditions?.length === result.segment?.conditions?.length
+                                  {aiResult.segment.queries?.length === result.segment?.queries?.length
                                     ? "Accord avec les règles"
                                     : "Divergence avec les règles"}
                                 </span>
                               )}
                             </div>
-                            {aiResult.segment.conditions?.map((c, i) => (
+                            {aiResult.segment.queries?.map((q, i) => (
                               <React.Fragment key={i}>
-                                {i > 0 && <LogicDivider logic={aiResult.segment.logic || "AND"} />}
-                                <ConditionCard condition={c} index={i} />
+                                {i > 0 && <LogicDivider logic={aiResult.segment.operator || "and"} />}
+                                <ConditionCard query={q} index={i} />
                               </React.Fragment>
                             ))}
                             <div style={{marginTop:8}}>

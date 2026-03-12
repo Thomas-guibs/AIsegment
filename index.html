@@ -211,6 +211,7 @@ const ROLLUPS = {
     keywords: /\bcommandes?\b|\bachats?\b|\border\b|\bacheté[e]?\b|\bcommandé[e]?\b|\bpurchase[s]?\b|\bconverti[e]?\b|\bpanier\b|\bfait?\s+(?:un[e]?\s+)?achat\b|\bpassé[e]?\s*(?:une?\s+)?commande\b|\bréalis[eé]\s*(?:une?\s+)?commande\b|\beffectué[e]?\s*(?:un[e]?\s+)?achat\b|\bshoppé?\b|\borg[eé]r[e]?\b/i,
     measures: {
       order_total_price: { label: "Montant total", keywords: /\bdépensé\b|\bmontant\b|\bpanier\s*moyen\b|\bsomme\b|\btotal\b|\bvaleur\b|\b€\b|\beuros?\b|\bca\b/i },
+      order_product_dcount: { label: "Produits distincts", keywords: /\bproduits?\s*distincts?\b|\bproduits?\s*diff[eé]rents?\b|\bproduits?\s*uniques?\b|\bréférences?\s*distinctes?\b/i },
       order_items_count: { label: "Nb articles", keywords: /\barticles?\b|\bproduits?\b|\bitems?\b|\bquantité\b|\bréférence\b/i },
       order_currency: { label: "Devise", keywords: /\bdevise\b|\bcurrency\b|\bmonnaie\b/i },
     },
@@ -315,6 +316,7 @@ const MEASURE_DSL = {
   completed_orders: {
     count: { name: "mea_order_id_dcount", aggregation: "max" },
     order_total_price: { name: "mea_amount_sum", aggregation: "max" },
+    order_product_dcount: { name: "mea_product_id_dcount", aggregation: "max" },
     order_items_count: { name: "mea_items_count_sum", aggregation: "max" },
     order_currency: { name: "mea_currency", aggregation: "max" },
   },
@@ -351,6 +353,11 @@ const MEASURE_DSL = {
 function timeWindowToWhere(tw) {
   const today = new Date();
   const fmt = d => d.toISOString().slice(0, 10);
+  if (tw.type === "previous_month") {
+    const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const end = new Date(today.getFullYear(), today.getMonth(), 0);
+    return { field: "rollup_date", operator: "between", value: [fmt(start), fmt(end)] };
+  }
   if (tw.type === "relative_last") {
     const start = new Date(today);
     if (tw.unit === "days") start.setDate(start.getDate() - tw.value);
@@ -409,6 +416,8 @@ function buildDSLQuery(rollupKey, measure, operator, value, betweenVals, timeWin
   const having = [];
   if (isNegated) {
     having.push({ field: dslMeasure.name, operator: "eq", value: 0 });
+  } else if (operator === "is_not_null") {
+    having.push({ field: dslMeasure.name, operator: "is_not_null", value: null });
   } else if (operator === "between" && betweenVals) {
     having.push({ field: dslMeasure.name, operator: "between", value: [betweenVals[0], betweenVals[1]] });
   } else {
@@ -541,8 +550,8 @@ function detectTimeWindow(t) {
     return { type: "relative_last", value: 1, unit: "days", label: "hier" };
   if (/(?:la\s+)?semaine\s+(?:derni[eè]re|pass[eé]e)/i.test(t))
     return { type: "relative_last", value: 7, unit: "days", label: "semaine dernière" };
-  if (/(?:le\s+)?mois\s+(?:dernier|pass[eé])/i.test(t))
-    return { type: "relative_last", value: 30, unit: "days", label: "mois dernier" };
+  if (/(?:le\s+)?mois\s+(?:dernier|pass[eé]|pr[eé]c[eé]dent)/i.test(t))
+    return { type: "previous_month", value: 1, unit: "months", label: "mois précédent" };
   if (/(?:l[''])?an(?:née)?\s+(?:derni[eè]re?|pass[eé]e?)/i.test(t))
     return { type: "relative_last", value: 1, unit: "years", label: "année dernière" };
   const m1 = t.match(/(?:sur\s+)?(?:les\s+)?(\d+)\s*derniers?\s*(jours?|semaines?|mois|ans?)/i);
@@ -593,13 +602,14 @@ function detectTimeWindow(t) {
   return null;
 }
 function detectOperator(t) {
+  if (/\bn['']est\s*pas\s*vide\b|\bnon\s*vide\b|\bnon\s*null\b|\bpas\s*(?:null|vide)\b|\bexiste\b|\bis[_\s]*not[_\s]*null\b/i.test(t)) return "is_not_null";
   if (/\bexactement\b|\bjuste\b|\bpile\b|==?\s*\d/i.test(t)) return "eq";
   if (/strictement\s*(?:plus|sup[eé]rieur)|\bau[-\s]*del[aà]\s*de\b/i.test(t)) return "gt";
   if (/strictement\s*(?:moins|inf[eé]rieur)/i.test(t)) return "lt";
   if (/\bau\s*plus\b|\bmaximum\b|\bau\s*maximum\b|<=\s*\d|\bpas\s*plus\s*de\b|\binférieur[e]?\s*ou\s*égal/i.test(t)) return "lte";
   if (/\bmoins\s*de\b|\binférieur[e]?\s*à\b|\ben\s*dessous\s*de\b/i.test(t)) return "lt";
   if (/\bentre\s+\d|\bcompris\s+entre\b/i.test(t)) return "between";
-  if (/\bau\s*moins\b|\bminimum\b|\bau\s*minimum\b|\bplus\s*de\b|\bsupérieur[e]?\s*ou\s*égal|>=\s*\d/i.test(t)) return "gte";
+  if (/\bau\s*moins\b|\bminimum\b|\bau\s*minimum\b|\bplus\s*de\b|\bsupérieur[e]?\s*(?:à|ou\s*égal)|>=\s*\d/i.test(t)) return "gte";
   return "gte";
 }
 function extractTextualNumber(t) {
@@ -720,10 +730,10 @@ function splitByLogic(text) {
 const OP_LABELS = {
   gte: "Supérieur ou égal à", gt: "Supérieur à", lte: "Inférieur ou égal à",
   lt: "Inférieur à", eq: "Égal à", between: "Entre",
-  neq: "Différent de",
+  neq: "Différent de", is_not_null: "N'est pas vide",
 };
 const OP_SHORT = {
-  gte: "≥", gt: ">", lte: "≤", lt: "<", eq: "=", between: "↔", neq: "≠",
+  gte: "≥", gt: ">", lte: "≤", lt: "<", eq: "=", between: "↔", neq: "≠", is_not_null: "≠∅",
 };
 function parsePrompt(text) {
   const t = text.trim();
@@ -741,15 +751,16 @@ function parsePrompt(text) {
   const operator = isNegated ? "eq" : detectOperator(tl);
   trace.push({ step: "Opérateur", result: (OP_LABELS[operator] || operator)+(isNegated ? " [forcé par négation]" : "") });
   const betweenVals = operator === "between" ? extractBetweenValues(tl) : null;
-  const numResult = extractNumericValue(tl);
-  const value = isNegated ? 0 : (betweenVals ? betweenVals[0] : numResult.value);
+  const numResult = operator === "is_not_null" ? { value: null, textual: null } : extractNumericValue(tl);
+  const value = isNegated ? 0 : operator === "is_not_null" ? null : (betweenVals ? betweenVals[0] : numResult.value);
   trace.push({
     step: "Valeur extraite",
-    result: numResult.textual
-      ? value+'  (depuis texte : "'+numResult.textual+'")'
-      : value+(betweenVals ? " à "+betweenVals[1] : ""),
+    result: operator === "is_not_null" ? "null (is_not_null)"
+      : numResult.textual
+        ? value+'  (depuis texte : "'+numResult.textual+'")'
+        : value+(betweenVals ? " à "+betweenVals[1] : ""),
   });
-  if (numResult.value === 1 && !numResult.textual && !isNegated && !/\b1\b/.test(t)) {
+  if (operator !== "is_not_null" && numResult.value === 1 && !numResult.textual && !isNegated && !/\b1\b/.test(t)) {
     warnings.push("Aucune valeur numérique détectée — défaut : 1");
   }
   const measureField = detectMeasureField(rollupKey, tl);
@@ -792,11 +803,35 @@ function parseCompoundPrompt(text) {
       ...r.trace.map(t => ({ step: "  "+t.step, result: t.result })),
     ]),
   ];
+  // Merge queries on the same rollup: first query's having stays, others become where filters
+  const mergedQueries = [];
+  const rollupMap = {};
+  for (const q of allQueries) {
+    if (rollupMap[q.rollup] !== undefined) {
+      const primary = mergedQueries[rollupMap[q.rollup]];
+      // Move this query's having conditions into primary's where
+      for (const h of (q.having || [])) {
+        if (!primary.where) primary.where = [];
+        primary.where.push(h);
+      }
+      // Merge any where conditions too (e.g. date filters)
+      for (const w of (q.where || [])) {
+        if (!primary.where) primary.where = [];
+        // Avoid duplicate rollup_date entries — keep the first one
+        if (w.field === "rollup_date" && primary.where.some(pw => pw.field === "rollup_date")) continue;
+        primary.where.push(w);
+      }
+    } else {
+      rollupMap[q.rollup] = mergedQueries.length;
+      mergedQueries.push(JSON.parse(JSON.stringify(q)));
+    }
+  }
+  combinedTrace.push({ step: "Merge same-rollup", result: allQueries.length+" queries → "+mergedQueries.length+" merged" });
   return {
     success: true, errors: allErrors, warnings: allWarnings,
     raw: text, trace: combinedTrace, isCompound: true, logic,
     clauseParts: parts,
-    segment: { operator: logic.toLowerCase(), queries: allQueries },
+    segment: { operator: logic.toLowerCase(), queries: mergedQueries },
   };
 }
 /* =============================================================
@@ -804,6 +839,7 @@ function parseCompoundPrompt(text) {
 ============================================================= */
 const CLAUDE_SYSTEM_PROMPT = `Tu es un moteur de segmentation pour Loyoly, une plateforme de fidélité e-commerce.
 Tu reçois une description en langage naturel (français) d'un segment de clients et tu dois la convertir en un objet JSON DSL structuré.
+Date du jour : ${new Date().toISOString().slice(0,10)}. Utilise cette date pour calculer les périodes relatives (mois précédent, cette année, etc.).
 ## Rollups disponibles (type d'action client)
 - completed_orders : commandes passées (acheté, commandé, achat, purchase, converti, panier...)
 - customer_properties : propriétés client (pays, âge, genre, tags, VIP, inscrit...)
@@ -814,48 +850,58 @@ Tu reçois une description en langage naturel (français) d'un segment de client
 - reward_used : récompenses utilisées (récompense utilisée, bon de réduction, coupon utilisé, redeem...)
 - reward_obtained : récompenses/badges obtenus (récompense obtenue, badge, niveau atteint, débloqué...)
 ## Mesures DSL par rollup
-- completed_orders: mea_order_id_dcount (count), mea_amount_sum (montant total), mea_items_count_sum (nb articles)
+- completed_orders: mea_order_id_dcount (count commandes), mea_amount_sum (montant total), mea_product_id_dcount (produits distincts), mea_items_count_sum (nb articles)
 - customer_properties: mea_age (âge), dim_country (pays), dim_gender (genre), dim_tag (tag)
-- completed_mission: mea_mission_id_dcount (count), mea_points_sum (points mission)
+- completed_mission: mea_mission_id_dcount (count missions), mea_points_sum (points mission)
 - points_transaction: mea_points_sum (montant points)
-- referral_completed_godfather: mea_referral_id_dcount (count)
-- referral_completed_godson: mea_referral_id_dcount (count)
-- reward_used: mea_reward_id_dcount (count)
-- reward_obtained: mea_reward_id_dcount (count)
-## Opérateurs disponibles (pour where et having)
+- referral_completed_godfather: mea_referral_id_dcount (count parrainages)
+- referral_completed_godson: mea_referral_id_dcount (count parrainages)
+- reward_used: mea_reward_id_dcount (count récompenses)
+- reward_obtained: mea_reward_id_dcount (count récompenses)
+## Opérateurs disponibles
 - "gte" : au moins, minimum, plus de
-- "gt" : strictement plus de, au-delà de
+- "gt" : strictement plus de, supérieur à
 - "lte" : au plus, maximum, pas plus de
-- "lt" : moins de, strictement moins
+- "lt" : moins de, inférieur à
 - "eq" : exactement, juste, pile
 - "between" : entre X et Y (value est un tableau [min, max])
-- "is_not_null" : existe (value: null)
+- "is_not_null" : n'est pas vide, existe (value: null)
 Pour une négation (sans, jamais, n'ayant pas), utilise operator "eq" et value 0 dans having.
-## Structure DSL
+## Structure DSL — RÈGLES CRITIQUES
 - "operator" (niveau racine) : "and" ou "or" (minuscules)
-- "queries" : tableau de requêtes
-- Chaque requête contient :
+- "queries" : tableau de requêtes. Si plusieurs conditions portent sur LE MÊME rollup, elles doivent être dans UNE SEULE query.
+- Chaque query contient :
   - "rollup" : le type de rollup
-  - "select" : { "measures": [{ "name": "mea_xxx", "aggregation": "max" }] }
-  - "where" (optionnel) : filtres pré-agrégation [{ "field": "...", "operator": "...", "value": ... }]
-    - Dates : { "field": "rollup_date", "operator": "between", "value": ["YYYY-MM-DD", "YYYY-MM-DD"] }
-    - Dimensions : { "field": "dim_xxx", "operator": "eq", "value": "..." }
-  - "having" : filtres post-agrégation [{ "field": "mea_xxx", "operator": "...", "value": ... }]
+  - "select" : contient UNIQUEMENT la mesure principale (l'agrégat qu'on vérifie dans having)
+    { "measures": [{ "name": "mea_xxx", "aggregation": "max" }] }
+  - "where" : filtres pré-agrégation. Contient :
+    - Les dates : { "field": "rollup_date", "operator": "between", "value": ["YYYY-MM-DD", "YYYY-MM-DD"] }
+    - Les filtres sur d'autres mesures : { "field": "mea_amount_sum", "operator": "gt", "value": 10 }
+    - Les dimensions : { "field": "dim_xxx", "operator": "eq", "value": "..." }
+  - "having" : contient UNIQUEMENT la condition sur la mesure sélectionnée dans select
+    Ex: { "field": "mea_order_id_dcount", "operator": "is_not_null", "value": null }
+## IMPORTANT : where vs having
+- "select" = UNE seule mesure principale (l'agrégat à vérifier)
+- "where" = tous les filtres sur les AUTRES mesures + dates + dimensions
+- "having" = UNE condition sur la mesure de select uniquement
+- NE PAS mettre de filtres sur d'autres mesures dans having
+- NE PAS mettre plusieurs mesures dans select
 ## Format de sortie
 IMPORTANT : Réponds UNIQUEMENT avec du JSON valide, sans markdown, sans backticks, sans commentaires, sans explication. Pas de \`\`\`json ni de //.
+Exemple : "clients ayant des commandes (distinct) non vide, montant > 10, produits distincts > 2, mois précédent" :
 {
   "operator": "and",
   "queries": [
     {
       "rollup": "completed_orders",
-      "select": {
-        "measures": [{ "name": "mea_order_id_dcount", "aggregation": "max" }]
-      },
+      "select": { "measures": [{ "name": "mea_order_id_dcount", "aggregation": "max" }] },
       "where": [
-        { "field": "rollup_date", "operator": "between", "value": ["2026-03-01", "2026-03-31"] }
+        { "field": "mea_amount_sum", "operator": "gt", "value": 10 },
+        { "field": "mea_product_id_dcount", "operator": "gt", "value": 2 },
+        { "field": "rollup_date", "operator": "between", "value": ["2026-02-01", "2026-02-28"] }
       ],
       "having": [
-        { "field": "mea_order_id_dcount", "operator": "gte", "value": 3 }
+        { "field": "mea_order_id_dcount", "operator": "is_not_null", "value": null }
       ]
     }
   ]
@@ -1010,7 +1056,7 @@ function ConditionCard({ query, index }) {
                 {isNegated ? "Aucun(e)" : opLabel}
                 <IconChevron />
               </span>
-              {!isNegated && (
+              {!isNegated && havingClause.operator !== "is_not_null" && (
                 <span className="data-tag">
                   <IconDatabase />
                   {valueStr}

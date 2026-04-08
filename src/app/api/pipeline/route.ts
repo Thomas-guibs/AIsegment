@@ -1,105 +1,173 @@
+export const dynamic = "force-dynamic"
+
 import { NextRequest, NextResponse } from "next/server"
-import { fetchCustomerDeals, fetchNewDealsThisWeek, enrichDealsWithCompanies } from "@/lib/hubspot/deals"
+import { hubspotSearch } from "@/lib/hubspot/client"
+import { enrichDealsWithCompanies } from "@/lib/hubspot/deals"
+import type { HubSpotDeal, Deal } from "@/lib/types"
 import {
-  CUSTOMER_STAGE_CATEGORIES,
-  CUSTOMER_STAGE_LABELS,
-  STAGE_CATEGORY_LABELS,
-  STAGE_CATEGORY_COLORS,
+  DEAL_PROPERTIES,
+  SALES_STAGES,
+  SALES_STAGE_LABELS,
+  CSM_TEAM,
   ATTRIBUTION,
-  type StageCategory,
 } from "@/lib/constants"
-import type { PipelineFunnelStep, StageAging } from "@/lib/types"
-import { differenceInDays } from "date-fns"
+import { parseNumber, parseDate } from "@/lib/utils"
+
+// Sales pipeline stages in order (the "pipe")
+const PIPE_STAGES = [
+  { id: SALES_STAGES.DISCOVERY_CALL, label: "Discovery call", order: 1 },
+  { id: SALES_STAGES.QUALIFIED_30, label: "Qualified (30%)", order: 2 },
+  { id: SALES_STAGES.EVALUATE_50, label: "Evaluate (50%)", order: 3 },
+  { id: SALES_STAGES.OFFRE_ENVOYEE_70, label: "Offre envoyee (70%)", order: 4 },
+  { id: SALES_STAGES.GO_VERBAL_80, label: "Go verbal (80%)", order: 5 },
+]
+
+// Closed stages (for reference, not in the active pipe)
+const WON_STAGES = [SALES_STAGES.CLOSED_WON, SALES_STAGES.PAIEMENT_RECU]
+const LOST_STAGES = [SALES_STAGES.CLOSED_LOST, SALES_STAGES.CHURN_DOWNSELL]
+
+// Active CSMs (exclude Antoine Rivaud & Thomas Prouveur)
+const ACTIVE_CSMS = CSM_TEAM.filter(
+  (c) => c.id !== "1949410186" && c.id !== "44919918"
+)
+
+function transformDeal(raw: HubSpotDeal): Deal {
+  return {
+    id: raw.id,
+    name: raw.properties.dealname ?? "",
+    amount: parseNumber(raw.properties.amount),
+    mrr: parseNumber(raw.properties.hs_mrr),
+    arr: parseNumber(raw.properties.hs_arr),
+    acv: parseNumber(raw.properties.hs_acv),
+    attribution: raw.properties.attribution ?? null,
+    renewalDate: parseDate(raw.properties.renewall_date),
+    operationDate: parseDate(raw.properties.date_de_prise_en_compte),
+    closeDate: parseDate(raw.properties.closedate),
+    stage: raw.properties.dealstage ?? "",
+    pipeline: raw.properties.pipeline ?? "",
+    ownerId: raw.properties.hubspot_owner_id ?? null,
+    createdAt: parseDate(raw.properties.createdate),
+    lastModified: parseDate(raw.properties.hs_lastmodifieddate),
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
     const csmId = searchParams.get("csmId") ?? undefined
 
-    // Parallel fetch
-    const [allDeals, newUpsellDeals, newChurnDeals] = await Promise.all([
-      fetchCustomerDeals(csmId),
-      fetchNewDealsThisWeek(ATTRIBUTION.UPSELL),
-      fetchNewDealsThisWeek(ATTRIBUTION.CHURN),
+    // Active pipe stage IDs
+    const activePipeStageIds = PIPE_STAGES.map((s) => s.id)
+
+    // Fetch renewal deals (have renewall_date) + upsell deals (attribution=Upsell)
+    // that are in active pipeline stages
+    const [renewalRaw, upsellRaw] = await Promise.all([
+      hubspotSearch<HubSpotDeal>("deals", {
+        filterGroups: [
+          {
+            filters: [
+              { propertyName: "renewall_date", operator: "HAS_PROPERTY" },
+              { propertyName: "dealstage", operator: "IN", values: activePipeStageIds },
+              ...(csmId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: csmId }] : []),
+            ],
+          },
+        ],
+        properties: [...DEAL_PROPERTIES],
+      }, `pipeline_renewals_${csmId ?? "all"}`),
+      hubspotSearch<HubSpotDeal>("deals", {
+        filterGroups: [
+          {
+            filters: [
+              { propertyName: "attribution", operator: "EQ", value: ATTRIBUTION.UPSELL },
+              { propertyName: "dealstage", operator: "IN", values: activePipeStageIds },
+              ...(csmId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: csmId }] : []),
+            ],
+          },
+        ],
+        properties: [...DEAL_PROPERTIES],
+      }, `pipeline_upsells_${csmId ?? "all"}`),
     ])
 
-    // Enrich new deals with company names
-    const [enrichedUpsell, enrichedChurn] = await Promise.all([
-      enrichDealsWithCompanies(newUpsellDeals),
-      enrichDealsWithCompanies(newChurnDeals),
-    ])
-
-    // Build funnel steps grouped by category
-    const categoryOrder: StageCategory[] = ["onboarding", "active", "at_risk", "churned"]
-    const categoryCounts: Record<StageCategory, { count: number; mrr: number }> = {
-      onboarding: { count: 0, mrr: 0 },
-      active: { count: 0, mrr: 0 },
-      at_risk: { count: 0, mrr: 0 },
-      churned: { count: 0, mrr: 0 },
-      disqualified: { count: 0, mrr: 0 },
-    }
-
-    for (const deal of allDeals) {
-      const category = CUSTOMER_STAGE_CATEGORIES[deal.stage]
-      if (category) {
-        categoryCounts[category].count++
-        categoryCounts[category].mrr += deal.mrr
+    // Deduplicate (a deal can be both renewal + upsell)
+    const allDealsMap = new Map<string, Deal>()
+    for (const raw of [...renewalRaw, ...upsellRaw]) {
+      if (!allDealsMap.has(raw.id)) {
+        allDealsMap.set(raw.id, transformDeal(raw))
       }
     }
+    let allDeals = Array.from(allDealsMap.values())
 
-    const funnel: PipelineFunnelStep[] = categoryOrder.map((cat, i) => ({
-      category: cat,
-      label: STAGE_CATEGORY_LABELS[cat],
-      dealCount: categoryCounts[cat].count,
-      totalMrr: categoryCounts[cat].mrr,
-      conversionRate:
-        i > 0 && categoryCounts[categoryOrder[i - 1]].count > 0
-          ? (categoryCounts[cat].count / categoryCounts[categoryOrder[i - 1]].count) * 100
-          : null,
-      color: STAGE_CATEGORY_COLORS[cat],
-    }))
+    // Tag each deal as Renewal, Upsell, or both
+    const renewalIds = new Set(renewalRaw.map((r) => r.id))
+    const upsellIds = new Set(upsellRaw.map((r) => r.id))
 
-    // Stage aging analysis
-    const stageAging: StageAging[] = []
-    const stageGroups: Record<string, number[]> = {}
+    // Enrich with company names
+    allDeals = await enrichDealsWithCompanies(allDeals)
 
-    for (const deal of allDeals) {
-      if (!stageGroups[deal.stage]) stageGroups[deal.stage] = []
-      const daysInStage = deal.lastModified
-        ? differenceInDays(new Date(), new Date(deal.lastModified))
-        : 0
-      stageGroups[deal.stage].push(daysInStage)
-    }
+    // Build per-CSM pipeline
+    const csmPipelines = ACTIVE_CSMS.map((csm) => {
+      const csmDeals = allDeals.filter((d) => d.ownerId === csm.id)
 
-    for (const [stageId, days] of Object.entries(stageGroups)) {
-      const avgDays = days.reduce((a, b) => a + b, 0) / days.length
-      stageAging.push({
-        stageId,
-        stageLabel: CUSTOMER_STAGE_LABELS[stageId] ?? stageId,
-        avgDays: Math.round(avgDays),
-        dealCount: days.length,
-        isOverThreshold: avgDays > 30,
+      const stages = PIPE_STAGES.map((stage) => {
+        const stageDeals = csmDeals
+          .filter((d) => d.stage === stage.id)
+          .map((d) => ({
+            ...d,
+            dealType: renewalIds.has(d.id)
+              ? (upsellIds.has(d.id) ? "renewal+upsell" : "renewal")
+              : "upsell",
+          }))
+          .sort((a, b) => b.amount - a.amount)
+
+        return {
+          stageId: stage.id,
+          stageLabel: stage.label,
+          order: stage.order,
+          deals: stageDeals,
+          totalAmount: stageDeals.reduce((sum, d) => sum + d.amount, 0),
+          totalMrr: stageDeals.reduce((sum, d) => sum + d.mrr, 0),
+          count: stageDeals.length,
+        }
       })
-    }
 
-    // Sort aging by avgDays DESC
-    stageAging.sort((a, b) => b.avgDays - a.avgDays)
+      const totalDeals = csmDeals.length
+      const totalAmount = csmDeals.reduce((sum, d) => sum + d.amount, 0)
+      const totalMrr = csmDeals.reduce((sum, d) => sum + d.mrr, 0)
 
-    // All deals enriched with company names for the table
-    const enrichedDeals = await enrichDealsWithCompanies(allDeals)
+      return {
+        csmId: csm.id,
+        csmName: csm.name,
+        initials: csm.initials,
+        color: csm.color,
+        stages,
+        totalDeals,
+        totalAmount,
+        totalMrr,
+      }
+    })
+
+    // Global summary by stage
+    const globalStages = PIPE_STAGES.map((stage) => {
+      const stageDeals = allDeals.filter((d) => d.stage === stage.id)
+      return {
+        stageId: stage.id,
+        stageLabel: stage.label,
+        count: stageDeals.length,
+        totalAmount: stageDeals.reduce((sum, d) => sum + d.amount, 0),
+        totalMrr: stageDeals.reduce((sum, d) => sum + d.mrr, 0),
+      }
+    })
 
     return NextResponse.json({
-      funnel,
-      stageAging,
-      newUpsellDeals: enrichedUpsell,
-      newChurnDeals: enrichedChurn,
-      deals: enrichedDeals,
+      csmPipelines,
+      globalStages,
       totalDeals: allDeals.length,
+      totalAmount: allDeals.reduce((sum, d) => sum + d.amount, 0),
     })
   } catch (error) {
     console.error("Pipeline API error:", error)
     return NextResponse.json(
-      { error: "Failed to fetch pipeline data", details: String(error) },
+      { error: "Failed to fetch pipeline", details: String(error) },
       { status: 500 }
     )
   }

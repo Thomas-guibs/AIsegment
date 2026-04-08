@@ -274,11 +274,46 @@ export const DEAL_PROPERTIES = [
 ] as const
 
 // Company properties to fetch
+// MRR source: "total_revenue" (= Chiffre d'affaire total in HubSpot)
+// Customer filter: "phase_du_client" (Customer stage) not "lifecyclestage"
 export const COMPANY_PROPERTIES = [
   "name",
-  "mrr",
+  "total_revenue",
   "plan",
   "hubspot_owner_id",
+  "proprietaire_de_l_entreprise__csm_", // Company owner (CSM) — dedicated CSM assignment field
   "lifecyclestage",
+  "phase_du_client",
   "num_associated_deals",
 ] as const
+
+// Customer stage (phase_du_client) — active values for CSM dashboard
+// HubSpot internal values → display labels:
+//   "New" → Signed | "To come" → Engaged | "Onboarding" → Onboarding
+//   "Activated" → Activated | "Run" → Run
+export const ACTIVE_CUSTOMER_STAGES = ["New", "To come", "Onboarding", "Activated", "Run"] as const
+
+export const CUSTOMER_PHASE_LABELS: Record<string, string> = {
+  "New": "Signed",
+  "To come": "Engaged",
+  "Onboarding": "Onboarding",
+  "Activated": "Activated",
+  "Run": "Run",
+  "churn": "Churn",
+  "trial": "Trial",
+  "Lead": "Lead",
+  "Parent company": "Parent company",
+}
+
+// =============================================================================
+// DATA ARCHITECTURE NOTE
+// =============================================================================
+// Customer tracking uses:
+//   - Companies with phase_du_client IN [New, To come, Onboarding, Activated, Run]
+//   - hubspot_owner_id matching CSM_TEAM_IDS for per-CSM breakdown
+//   - total_revenue as the MRR/revenue field ("Chiffre d'affaire total")
+//
+// Deal tracking (Upsell/Churn/Downsell/Renewals) uses:
+//   - Deals in Sales pipeline ("default") with "attribution" property
+//   - Renewal deals identified by "renewall_date" property
+// =============================================================================

@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic"
+
 import { NextRequest, NextResponse } from "next/server"
 import { fetchEngagements, countEngagementsByOwner } from "@/lib/hubspot/engagements"
 import { getDateRange } from "@/lib/utils"

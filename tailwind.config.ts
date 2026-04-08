@@ -10,19 +10,19 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#0A0A0F",
-        "background-secondary": "#12121A",
-        card: "#1E1E2E",
-        "card-border": "#2A2A3C",
-        "card-hover": "#252538",
+        background: "var(--color-background)",
+        "background-secondary": "var(--color-background-secondary)",
+        card: "var(--color-card)",
+        "card-border": "var(--color-card-border)",
+        "card-hover": "var(--color-card-hover)",
         accent: "#2563EB",
         "accent-hover": "#3B82F6",
         positive: "#22C55E",
         negative: "#EF4444",
         warning: "#F59E0B",
-        "text-primary": "#E2E8F0",
-        "text-secondary": "#94A3B8",
-        "text-muted": "#64748B",
+        "text-primary": "var(--color-text-primary)",
+        "text-secondary": "var(--color-text-secondary)",
+        "text-muted": "var(--color-text-muted)",
       },
       fontFamily: {
         sans: ["Geist", "system-ui", "sans-serif"],

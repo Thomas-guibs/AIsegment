@@ -34,10 +34,12 @@ export interface HubSpotCompany {
   id: string
   properties: {
     name: string | null
-    mrr: string | null
+    total_revenue: string | null
     plan: string | null
     hubspot_owner_id: string | null
+    proprietaire_de_l_entreprise__csm_: string | null // Company owner (CSM)
     lifecyclestage: string | null
+    phase_du_client: string | null
     num_associated_deals: string | null
     [key: string]: string | null
   }
@@ -98,10 +100,11 @@ export interface Deal {
 export interface Company {
   id: string
   name: string
-  mrr: number
+  mrr: number // total_revenue from HubSpot ("Chiffre d'affaire total")
   plan: string | null
   ownerId: string | null
   lifecycleStage: string | null
+  customerStage: string | null // phase_du_client
   numDeals: number
 }
 

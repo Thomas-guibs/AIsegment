@@ -26,12 +26,21 @@ function transformDeal(raw: HubSpotDeal): Deal {
   }
 }
 
-// Fetch all deals in the Customers Stage pipeline
+// Fetch CSM-relevant deals from the Sales pipeline.
+// Uses attribution IN [...] to stay within HubSpot's filter group limits.
 export async function fetchCustomerDeals(ownerId?: string): Promise<Deal[]> {
   const filters: SearchFilterGroup[] = [
     {
       filters: [
-        { propertyName: "pipeline", operator: "EQ", value: PIPELINES.CUSTOMERS_STAGE },
+        { propertyName: "pipeline", operator: "EQ", value: PIPELINES.SALES },
+        { propertyName: "attribution", operator: "HAS_PROPERTY" },
+        ...(ownerId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }] : []),
+      ],
+    },
+    {
+      filters: [
+        { propertyName: "pipeline", operator: "EQ", value: PIPELINES.SALES },
+        { propertyName: "renewall_date", operator: "HAS_PROPERTY" },
         ...(ownerId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }] : []),
       ],
     },
@@ -47,30 +56,41 @@ export async function fetchCustomerDeals(ownerId?: string): Promise<Deal[]> {
   return raw.map(transformDeal)
 }
 
-// Fetch deals by attribution (Upsell, Churn, Downsell) within a date range
+// Fetch deals by attribution (Upsell, Churn, Downsell) within a date range.
+// HubSpot Search API doesn't reliably support filtering on custom date properties
+// like date_de_prise_en_compte. Strategy: fetch by attribution using IN operator
+// (single filter group), then filter by date client-side.
 export async function fetchAttributionDeals(
   attributions: string[],
   dateFrom: string,
   dateTo: string,
   ownerId?: string
 ): Promise<Deal[]> {
-  const filters: SearchFilterGroup[] = attributions.map((attr) => ({
-    filters: [
-      { propertyName: "attribution", operator: "EQ" as const, value: attr },
-      { propertyName: "date_de_prise_en_compte", operator: "GTE" as const, value: dateFrom },
-      { propertyName: "date_de_prise_en_compte", operator: "LTE" as const, value: dateTo },
-      ...(ownerId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }] : []),
-    ],
-  }))
+  const filters: SearchFilterGroup[] = [
+    {
+      filters: [
+        { propertyName: "attribution", operator: "IN", values: attributions },
+        ...(ownerId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }] : []),
+      ],
+    },
+  ]
 
-  const cacheKey = `attribution_deals_${attributions.join("_")}_${dateFrom}_${dateTo}_${ownerId ?? "all"}`
+  const cacheKey = `attribution_deals_${attributions.join("_")}_${ownerId ?? "all"}`
   const raw = await hubspotSearch<HubSpotDeal>("deals", {
     filterGroups: filters,
     properties: [...DEAL_PROPERTIES],
-    sorts: [{ propertyName: "date_de_prise_en_compte", direction: "DESCENDING" }],
+    sorts: [{ propertyName: "hs_lastmodifieddate", direction: "DESCENDING" }],
   }, cacheKey)
 
-  return raw.map(transformDeal)
+  const deals = raw.map(transformDeal)
+
+  // Client-side date filtering on date_de_prise_en_compte
+  return deals.filter((d) => {
+    const opDate = d.operationDate ?? d.closeDate ?? d.createdAt
+    if (!opDate) return false
+    const date = opDate.slice(0, 10) // YYYY-MM-DD
+    return date >= dateFrom && date <= dateTo
+  })
 }
 
 // Fetch CSM-relevant deals (Upsell + Churn + Downsell) within a date range
@@ -83,27 +103,36 @@ export async function fetchCsmMovements(dateFrom: string, dateTo: string, ownerI
   )
 }
 
-// Fetch deals with renewals in a date range
+// Fetch deals with renewals in a date range.
+// renewall_date is a custom property — HubSpot Search API doesn't support
+// GTE/LTE on it. Strategy: fetch all deals with renewall_date set, filter client-side.
 export async function fetchRenewalDeals(dateFrom: string, dateTo: string, ownerId?: string): Promise<Deal[]> {
   const filters: SearchFilterGroup[] = [
     {
       filters: [
-        { propertyName: "pipeline", operator: "EQ", value: PIPELINES.CUSTOMERS_STAGE },
-        { propertyName: "renewall_date", operator: "GTE", value: dateFrom },
-        { propertyName: "renewall_date", operator: "LTE", value: dateTo },
+        { propertyName: "renewall_date", operator: "HAS_PROPERTY" },
         ...(ownerId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }] : []),
       ],
     },
   ]
 
-  const cacheKey = `renewal_deals_${dateFrom}_${dateTo}_${ownerId ?? "all"}`
+  const cacheKey = `renewal_deals_${ownerId ?? "all"}`
   const raw = await hubspotSearch<HubSpotDeal>("deals", {
     filterGroups: filters,
     properties: [...DEAL_PROPERTIES],
-    sorts: [{ propertyName: "renewall_date", direction: "ASCENDING" }],
+    sorts: [{ propertyName: "hs_lastmodifieddate", direction: "DESCENDING" }],
   }, cacheKey)
 
-  return raw.map(transformDeal)
+  const deals = raw.map(transformDeal)
+
+  // Client-side date filtering on renewall_date
+  return deals
+    .filter((d) => {
+      if (!d.renewalDate) return false
+      const date = d.renewalDate.slice(0, 10)
+      return date >= dateFrom && date <= dateTo
+    })
+    .sort((a, b) => (a.renewalDate ?? "").localeCompare(b.renewalDate ?? ""))
 }
 
 // Fetch deals created this week with specific attribution

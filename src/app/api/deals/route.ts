@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic"
+
 import { NextRequest, NextResponse } from "next/server"
 import { fetchCsmMovements, enrichDealsWithCompanies } from "@/lib/hubspot/deals"
 import { getDateRange } from "@/lib/utils"

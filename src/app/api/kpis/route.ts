@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic"
+
 import { NextRequest, NextResponse } from "next/server"
 import { fetchCustomerCompanies, getTotalCustomerMrr } from "@/lib/hubspot/companies"
 import { fetchCsmMovements, fetchRenewalDeals } from "@/lib/hubspot/deals"
@@ -135,11 +137,31 @@ export async function GET(request: NextRequest) {
       format: "currency",
     }
 
-    // 5. Active Deals (in Customers Stage pipeline, active stages)
-    // We need to fetch deals from the customer pipeline for this
+    // 5. Active Deals — deals in the Sales pipeline with renewall_date or attribution
+    // Categorize by deal stage in the Sales pipeline
     const { fetchCustomerDeals } = await import("@/lib/hubspot/deals")
     const customerDeals = await fetchCustomerDeals(csmId)
-    const activeDeals = customerDeals.filter((d) => ACTIVE_STAGE_IDS.includes(d.stage))
+
+    // Sales pipeline stage categories for CSM reporting
+    const SALES_STAGE_CATEGORY: Record<string, StageCategory> = {
+      "qualifiedtobuy": "onboarding",     // Discovery call planned
+      "presentationscheduled": "onboarding", // Qualified
+      "contractsent": "active",            // Evaluate
+      "closedwon": "active",               // Offre envoyé
+      "878353129": "active",               // Go verbal
+      "closedlost": "active",              // Closed Won (!)
+      "143474109": "active",               // Paiement reçu
+      "1246247145": "active",              // Upsell
+      "124302781": "churned",              // Closed Lost
+      "124302782": "at_risk",              // Pending
+      "1220133077": "churned",             // Churn & Downsell
+    }
+
+    // Exclude churned stages for "active" count
+    const activeDeals = customerDeals.filter((d) => {
+      const cat = SALES_STAGE_CATEGORY[d.stage]
+      return cat && cat !== "churned"
+    })
 
     const breakdown: Record<StageCategory, number> = {
       onboarding: 0,
@@ -148,14 +170,14 @@ export async function GET(request: NextRequest) {
       churned: 0,
       disqualified: 0,
     }
-    for (const deal of activeDeals) {
-      const cat = CUSTOMER_STAGE_CATEGORIES[deal.stage]
+    for (const deal of customerDeals) {
+      const cat = SALES_STAGE_CATEGORY[deal.stage]
       if (cat) breakdown[cat]++
     }
 
     const activeDealsKpi: KpiValue & { breakdown: Record<StageCategory, number> } = {
       value: activeDeals.length,
-      previousValue: activeDeals.length, // No easy way to get previous without historical data
+      previousValue: activeDeals.length,
       delta: 0,
       deltaDirection: "flat",
       label: "Deals en cours",

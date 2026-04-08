@@ -35,6 +35,8 @@ export interface HubSpotCompany {
   properties: {
     name: string | null
     mrr: string | null
+    mrr_csm: string | null
+    mrr_total: string | null
     plan: string | null
     hubspot_owner_id: string | null
     lifecyclestage: string | null

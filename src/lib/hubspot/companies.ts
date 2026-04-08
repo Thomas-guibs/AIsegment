@@ -4,10 +4,16 @@ import { COMPANY_PROPERTIES, CSM_TEAM_IDS } from "../constants"
 import { parseNumber } from "../utils"
 
 function transformCompany(raw: HubSpotCompany): Company {
+  // Use mrr_csm (CSM-managed MRR) as the primary MRR field.
+  // Fall back to mrr_total, then mrr if mrr_csm is not set.
+  const mrr =
+    parseNumber(raw.properties.mrr_csm) ||
+    parseNumber(raw.properties.mrr_total) ||
+    parseNumber(raw.properties.mrr)
   return {
     id: raw.id,
     name: raw.properties.name ?? "",
-    mrr: parseNumber(raw.properties.mrr),
+    mrr,
     plan: raw.properties.plan ?? null,
     ownerId: raw.properties.hubspot_owner_id ?? null,
     lifecycleStage: raw.properties.lifecyclestage ?? null,

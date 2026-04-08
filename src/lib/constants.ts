@@ -274,11 +274,29 @@ export const DEAL_PROPERTIES = [
 ] as const
 
 // Company properties to fetch
+// NOTE: The actual MRR field in HubSpot is "mrr_csm" (not the default "mrr").
+// "mrr_total" also exists but "mrr_csm" is the CSM-managed MRR.
 export const COMPANY_PROPERTIES = [
   "name",
   "mrr",
+  "mrr_csm",
+  "mrr_total",
   "plan",
   "hubspot_owner_id",
   "lifecyclestage",
   "num_associated_deals",
 ] as const
+
+// =============================================================================
+// DATA ARCHITECTURE NOTE
+// =============================================================================
+// In HubSpot, the Customers Stage pipeline (801956030) exists but has 0 deals.
+// All CSM-relevant deals live in the Sales pipeline ("default"):
+//   - Upsell/Churn/Downsell deals identified by the "attribution" property
+//   - Renewal deals identified by "renewall_date" property
+//   - Deal stages like "1220133077" (Churn & Downsell), "1246247145" (Upsell),
+//     "closedlost" (Closed Won), "143474109" (Paiement reçu) etc.
+//
+// Customer tracking is primarily via Companies with lifecyclestage=customer
+// and hubspot_owner_id matching CSM_TEAM_IDS.
+// =============================================================================

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { fetchCustomerDeals, fetchNewDealsThisWeek, enrichDealsWithCompanies } from "@/lib/hubspot/deals"
 import {
-  CUSTOMER_STAGE_CATEGORIES,
-  CUSTOMER_STAGE_LABELS,
+  SALES_STAGE_LABELS,
   STAGE_CATEGORY_LABELS,
   STAGE_CATEGORY_COLORS,
   ATTRIBUTION,
@@ -10,6 +9,21 @@ import {
 } from "@/lib/constants"
 import type { PipelineFunnelStep, StageAging } from "@/lib/types"
 import { differenceInDays } from "date-fns"
+
+// Sales pipeline stage categories for funnel analysis
+const SALES_STAGE_CATEGORY: Record<string, StageCategory> = {
+  "qualifiedtobuy": "onboarding",     // Discovery call planned
+  "presentationscheduled": "onboarding", // Qualified (30%)
+  "contractsent": "active",            // Evaluate (50%)
+  "closedwon": "active",               // Offre envoyé (70%)
+  "878353129": "active",               // Go verbal (80%)
+  "closedlost": "active",              // Closed Won (inverted naming!)
+  "143474109": "active",               // Paiement reçu
+  "1246247145": "active",              // Upsell
+  "124302781": "churned",              // Closed Lost
+  "124302782": "at_risk",              // Pending
+  "1220133077": "churned",             // Churn & Downsell
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -40,7 +54,7 @@ export async function GET(request: NextRequest) {
     }
 
     for (const deal of allDeals) {
-      const category = CUSTOMER_STAGE_CATEGORIES[deal.stage]
+      const category = SALES_STAGE_CATEGORY[deal.stage]
       if (category) {
         categoryCounts[category].count++
         categoryCounts[category].mrr += deal.mrr
@@ -75,7 +89,7 @@ export async function GET(request: NextRequest) {
       const avgDays = days.reduce((a, b) => a + b, 0) / days.length
       stageAging.push({
         stageId,
-        stageLabel: CUSTOMER_STAGE_LABELS[stageId] ?? stageId,
+        stageLabel: SALES_STAGE_LABELS[stageId] ?? stageId,
         avgDays: Math.round(avgDays),
         dealCount: days.length,
         isOverThreshold: avgDays > 30,

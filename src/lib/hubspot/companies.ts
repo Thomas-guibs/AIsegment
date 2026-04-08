@@ -16,9 +16,10 @@ function transformCompany(raw: HubSpotCompany): Company {
   }
 }
 
-// Fetch active customer companies managed by CSM team.
+// Fetch active customer companies.
 // Filter: phase_du_client IN [Signed, Engaged, Onboarding, Activated, Run]
-//         AND hubspot_owner_id IN CSM_TEAM
+// When ownerId is provided, also filter by that specific owner (for per-CSM views).
+// When no ownerId, fetch ALL active companies (not just CSM team) for total MRR.
 export async function fetchCustomerCompanies(ownerId?: string): Promise<Company[]> {
   const filterGroups = [
     {
@@ -26,7 +27,7 @@ export async function fetchCustomerCompanies(ownerId?: string): Promise<Company[
         { propertyName: "phase_du_client", operator: "IN" as const, values: [...ACTIVE_CUSTOMER_STAGES] },
         ...(ownerId
           ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }]
-          : [{ propertyName: "hubspot_owner_id", operator: "IN" as const, values: CSM_TEAM_IDS }]
+          : []
         ),
       ],
     },

@@ -281,6 +281,7 @@ export const COMPANY_PROPERTIES = [
   "total_revenue",
   "plan",
   "hubspot_owner_id",
+  "proprietaire_de_l_entreprise__csm_", // Company owner (CSM) — dedicated CSM assignment field
   "lifecyclestage",
   "phase_du_client",
   "num_associated_deals",

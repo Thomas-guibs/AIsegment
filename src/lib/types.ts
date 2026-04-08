@@ -37,6 +37,7 @@ export interface HubSpotCompany {
     total_revenue: string | null
     plan: string | null
     hubspot_owner_id: string | null
+    proprietaire_de_l_entreprise__csm_: string | null // Company owner (CSM)
     lifecyclestage: string | null
     phase_du_client: string | null
     num_associated_deals: string | null

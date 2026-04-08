@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import type { Deal } from "@/lib/types"
 import { cn, formatCurrency, formatDateFR } from "@/lib/utils"
 import {
@@ -113,7 +114,13 @@ export function DealsTable({
                 )}
               >
                 <td className="px-4 py-3 text-sm text-text-primary font-medium">
-                  {deal.companyName ?? "-"}
+                  {deal.companyId ? (
+                    <Link href={`/account/${deal.companyId}`} className="hover:text-accent transition-colors hover:underline">
+                      {deal.companyName ?? "-"}
+                    </Link>
+                  ) : (
+                    deal.companyName ?? "-"
+                  )}
                 </td>
                 <td className="px-4 py-3 text-sm text-text-secondary">{deal.name}</td>
                 {showAttribution && (

@@ -100,12 +100,76 @@ export interface Deal {
 export interface Company {
   id: string
   name: string
+  domain: string | null
   mrr: number // total_revenue from HubSpot ("Chiffre d'affaire total")
   plan: string | null
   ownerId: string | null
   lifecycleStage: string | null
   customerStage: string | null // phase_du_client
   numDeals: number
+  // Product data
+  revenueLoyalty: number
+  revenueReferral: number
+  roi: number
+  totalMissions: number
+  totalOrders: number
+  scoreLoyalty: number
+  scoreReferral: number
+  participationRate: number
+  rewardsConversionRate: number
+  pointsUsageRate: number
+  referralConversionRate: number
+  newClientsRateReferral: number
+  totalAskedReferral: number
+  // CSM metadata
+  isStrategic: boolean
+  accompagnement: string | null
+  reasonChurn: string | null
+  customerSituation: string | null
+}
+
+export interface IntercomTicket {
+  id: string
+  title: string
+  state: "open" | "closed" | "snoozed"
+  priority: string | null
+  createdAt: string
+  updatedAt: string
+  url: string
+}
+
+export interface CalendarMeeting {
+  id: string
+  summary: string
+  start: string
+  end: string
+  status: "confirmed" | "cancelled" | "tentative"
+  attendees: string[]
+  link: string | null
+}
+
+export interface HealthScore {
+  total: number // 0-100
+  grade: "excellent" | "good" | "warning" | "critical"
+  breakdown: {
+    roi: number
+    revenue: number
+    missions: number
+    scoreLoyalty: number
+    scoreReferral: number
+    participationRate: number
+    supportTickets: number
+    lastActivity: number
+    customerStage: number
+  }
+}
+
+export interface AccountDetail {
+  company: Company
+  healthScore: HealthScore
+  deals: Deal[]
+  tickets: IntercomTicket[]
+  meetings: CalendarMeeting[]
 }
 
 export interface Engagement {

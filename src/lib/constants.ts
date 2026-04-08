@@ -278,13 +278,33 @@ export const DEAL_PROPERTIES = [
 // Customer filter: "phase_du_client" (Customer stage) not "lifecyclestage"
 export const COMPANY_PROPERTIES = [
   "name",
+  "domain",
   "total_revenue",
   "plan",
   "hubspot_owner_id",
-  "proprietaire_de_l_entreprise__csm_", // Company owner (CSM) — dedicated CSM assignment field
+  "proprietaire_de_l_entreprise__csm_",
   "lifecyclestage",
   "phase_du_client",
   "num_associated_deals",
+  // Product data (synced from Loyoly)
+  "revenue_loyalty",
+  "revenue_referral",
+  "roi",
+  "total_missions",
+  "total_orders",
+  "score_loyalty",
+  "score_referral",
+  "participation_rate__loyalty_",
+  "rewards_conversion_rate__loyalty_",
+  "points_usage_rate__loyalty_",
+  "referral_conversion_rate",
+  "new_clients_rate__referral_",
+  "total_asked_referral",
+  // CSM metadata
+  "compte_strategique",
+  "cs_accompagnement",
+  "reason_churn",
+  "customers_situation",
 ] as const
 
 // Customer stage (phase_du_client) — active values for CSM dashboard

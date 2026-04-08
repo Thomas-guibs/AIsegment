@@ -103,26 +103,36 @@ export async function fetchCsmMovements(dateFrom: string, dateTo: string, ownerI
   )
 }
 
-// Fetch deals with renewals in a date range
+// Fetch deals with renewals in a date range.
+// renewall_date is a custom property — HubSpot Search API doesn't support
+// GTE/LTE on it. Strategy: fetch all deals with renewall_date set, filter client-side.
 export async function fetchRenewalDeals(dateFrom: string, dateTo: string, ownerId?: string): Promise<Deal[]> {
   const filters: SearchFilterGroup[] = [
     {
       filters: [
-        { propertyName: "renewall_date", operator: "GTE", value: dateFrom },
-        { propertyName: "renewall_date", operator: "LTE", value: dateTo },
+        { propertyName: "renewall_date", operator: "HAS_PROPERTY" },
         ...(ownerId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }] : []),
       ],
     },
   ]
 
-  const cacheKey = `renewal_deals_${dateFrom}_${dateTo}_${ownerId ?? "all"}`
+  const cacheKey = `renewal_deals_${ownerId ?? "all"}`
   const raw = await hubspotSearch<HubSpotDeal>("deals", {
     filterGroups: filters,
     properties: [...DEAL_PROPERTIES],
-    sorts: [{ propertyName: "renewall_date", direction: "ASCENDING" }],
+    sorts: [{ propertyName: "hs_lastmodifieddate", direction: "DESCENDING" }],
   }, cacheKey)
 
-  return raw.map(transformDeal)
+  const deals = raw.map(transformDeal)
+
+  // Client-side date filtering on renewall_date
+  return deals
+    .filter((d) => {
+      if (!d.renewalDate) return false
+      const date = d.renewalDate.slice(0, 10)
+      return date >= dateFrom && date <= dateTo
+    })
+    .sort((a, b) => (a.renewalDate ?? "").localeCompare(b.renewalDate ?? ""))
 }
 
 // Fetch deals created this week with specific attribution

@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useState } from "react"
+import Link from "next/link"
 import { Header } from "@/components/layout/Header"
 import { KpiCard, KpiCardSkeleton } from "@/components/charts/KpiCard"
 import { DonutChart } from "@/components/charts/DonutChart"
@@ -176,6 +177,7 @@ function PortfolioContent() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-text-muted uppercase">Company</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-text-muted uppercase">Plan</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-text-muted uppercase">MRR</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-text-muted uppercase">ROI</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-card-border">
@@ -187,9 +189,14 @@ function PortfolioContent() {
                       i % 2 === 1 && "bg-background/30"
                     )}
                   >
-                    <td className="px-4 py-3 text-sm font-medium text-text-primary">{company.name}</td>
+                    <td className="px-4 py-3 text-sm font-medium text-text-primary">
+                      <Link href={`/account/${company.id}`} className="hover:text-accent transition-colors hover:underline">
+                        {company.name}
+                      </Link>
+                    </td>
                     <td className="px-4 py-3 text-sm text-text-secondary">{company.plan ?? "-"}</td>
                     <td className="px-4 py-3 text-sm font-mono text-text-primary">{formatCurrency(company.mrr)}</td>
+                    <td className="px-4 py-3 text-sm font-mono text-text-secondary">{company.roi > 0 ? `${company.roi.toFixed(1)}x` : "—"}</td>
                   </tr>
                 ))}
               </tbody>

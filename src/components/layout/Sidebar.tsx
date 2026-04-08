@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import {
   LayoutDashboard,
+  Building2,
   CalendarClock,
   GitBranch,
   Users,
@@ -17,8 +18,9 @@ import {
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Renouvellements", href: "/renewals", icon: CalendarClock },
+  { name: "Comptes", href: "/accounts", icon: Building2 },
   { name: "Pipeline", href: "/pipeline", icon: GitBranch },
+  { name: "Renouvellements", href: "/renewals", icon: CalendarClock },
   { name: "Portefeuille", href: "/portfolio", icon: Users },
   { name: "Tendances", href: "/trends", icon: TrendingUp },
 ]
@@ -50,7 +52,7 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 px-2 py-4 space-y-1">
         {navigation.map((item) => {
-          const isActive = pathname === item.href
+          const isActive = pathname === item.href || (item.href === "/accounts" && pathname.startsWith("/account"))
           return (
             <Link
               key={item.href}

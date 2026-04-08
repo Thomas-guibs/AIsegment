@@ -8,8 +8,8 @@ import { LineChartComponent } from "@/components/charts/LineChart"
 import { MiniDonut } from "@/components/charts/DonutChart"
 import { DealsTable, DealsTableSkeleton } from "@/components/tables/DealsTable"
 import { useFetch } from "@/lib/hooks"
-import type { DashboardKpis, Deal, WeeklyMovement, NrrDataPoint } from "@/lib/types"
-import { STAGE_CATEGORY_COLORS, STAGE_CATEGORY_LABELS, type StageCategory } from "@/lib/constants"
+import type { DashboardKpis, Deal } from "@/lib/types"
+import { STAGE_CATEGORY_COLORS, STAGE_CATEGORY_LABELS, CSM_TEAM, type StageCategory } from "@/lib/constants"
 import {
   DollarSign,
   Percent,
@@ -19,13 +19,16 @@ import {
   CalendarClock,
 } from "lucide-react"
 
+interface NrrTrendsResponse {
+  chartData: Record<string, unknown>[]
+  global: Array<{ month: string; monthLabel: string; nrr: number; startingMrr: number; upsell: number; churn: number; downsell: number }>
+  perCsm: Array<{ csmId: string; csmName: string; color: string; months: Array<{ monthLabel: string; nrr: number }> }>
+}
+
 function DashboardContent() {
   const { data: kpis, loading: kpisLoading } = useFetch<DashboardKpis>("/api/kpis")
   const { data: dealsData, loading: dealsLoading } = useFetch<{ deals: Deal[] }>("/api/deals")
-
-  // Mock weekly data for charts (will be populated from real data)
-  const weeklyData: WeeklyMovement[] = []
-  const nrrData: NrrDataPoint[] = []
+  const { data: nrrTrends, loading: nrrLoading } = useFetch<NrrTrendsResponse>("/api/nrr-trends")
 
   return (
     <div className="p-6 space-y-6">
@@ -64,42 +67,58 @@ function DashboardContent() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">
           <h3 className="text-sm font-medium text-text-secondary mb-4">
-            Upsell vs Churn vs Downsell (12 semaines)
+            Upsell vs Churn vs Downsell (6 mois)
           </h3>
-          {weeklyData.length > 0 ? (
+          {nrrLoading ? (
+            <div className="skeleton h-[280px]" />
+          ) : nrrTrends?.global ? (
             <BarChartComponent
-              data={weeklyData}
+              data={nrrTrends.global.map((m) => ({
+                monthLabel: m.monthLabel,
+                upsell: m.upsell,
+                churn: m.churn,
+                downsell: m.downsell,
+              }))}
               series={[
                 { key: "upsell", label: "Upsell", color: "#22C55E" },
                 { key: "churn", label: "Churn", color: "#EF4444" },
                 { key: "downsell", label: "Downsell", color: "#F59E0B" },
               ]}
-              xKey="weekLabel"
+              xKey="monthLabel"
               stacked
               height={280}
             />
           ) : (
             <div className="flex items-center justify-center h-[280px] text-text-muted text-sm">
-              Les graphiques se rempliront avec les donnees HubSpot
+              Aucune donnee disponible
             </div>
           )}
         </div>
 
         <div className="card">
           <h3 className="text-sm font-medium text-text-secondary mb-4">
-            NRR Rolling 6 mois
+            NRR par CSM — Rolling 6 mois
           </h3>
-          {nrrData.length > 0 ? (
+          {nrrLoading ? (
+            <div className="skeleton h-[280px]" />
+          ) : nrrTrends?.chartData && nrrTrends.chartData.length > 0 ? (
             <LineChartComponent
-              data={nrrData}
-              series={[{ key: "nrr", label: "NRR Global", color: "#2563EB" }]}
+              data={nrrTrends.chartData}
+              series={[
+                { key: "Global", label: "Global", color: "#E2E8F0", dashed: true },
+                ...CSM_TEAM.filter((c) => c.role !== "COO (backup)").map((csm) => ({
+                  key: csm.name.split(" ")[0],
+                  label: csm.name.split(" ")[0],
+                  color: csm.color,
+                })),
+              ]}
               xKey="monthLabel"
               height={280}
-              referenceLine={{ y: 110, label: "Target 110%", color: "#22C55E" }}
+              referenceLine={{ y: 100, label: "100%", color: "#64748B" }}
             />
           ) : (
             <div className="flex items-center justify-center h-[280px] text-text-muted text-sm">
-              Les graphiques se rempliront avec les donnees HubSpot
+              Aucune donnee NRR disponible
             </div>
           )}
         </div>

@@ -27,28 +27,21 @@ function transformDeal(raw: HubSpotDeal): Deal {
 }
 
 // Fetch CSM-relevant deals from the Sales pipeline.
-// NOTE: The Customers Stage pipeline (801956030) has 0 deals in practice.
-// All CSM deals live in the Sales pipeline ("default") and are identified
-// by the "attribution" field (Upsell/Churn/Downsell) or "renewall_date".
+// Uses attribution IN [...] to stay within HubSpot's filter group limits.
 export async function fetchCustomerDeals(ownerId?: string): Promise<Deal[]> {
-  // Fetch deals that have an attribution OR a renewall_date (CSM-managed deals)
-  const ownerFilter = ownerId
-    ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }]
-    : []
-
   const filters: SearchFilterGroup[] = [
     {
       filters: [
         { propertyName: "pipeline", operator: "EQ", value: PIPELINES.SALES },
         { propertyName: "attribution", operator: "HAS_PROPERTY" },
-        ...ownerFilter,
+        ...(ownerId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }] : []),
       ],
     },
     {
       filters: [
         { propertyName: "pipeline", operator: "EQ", value: PIPELINES.SALES },
         { propertyName: "renewall_date", operator: "HAS_PROPERTY" },
-        ...ownerFilter,
+        ...(ownerId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }] : []),
       ],
     },
   ]
@@ -63,30 +56,41 @@ export async function fetchCustomerDeals(ownerId?: string): Promise<Deal[]> {
   return raw.map(transformDeal)
 }
 
-// Fetch deals by attribution (Upsell, Churn, Downsell) within a date range
+// Fetch deals by attribution (Upsell, Churn, Downsell) within a date range.
+// HubSpot Search API doesn't reliably support filtering on custom date properties
+// like date_de_prise_en_compte. Strategy: fetch by attribution using IN operator
+// (single filter group), then filter by date client-side.
 export async function fetchAttributionDeals(
   attributions: string[],
   dateFrom: string,
   dateTo: string,
   ownerId?: string
 ): Promise<Deal[]> {
-  const filters: SearchFilterGroup[] = attributions.map((attr) => ({
-    filters: [
-      { propertyName: "attribution", operator: "EQ" as const, value: attr },
-      { propertyName: "date_de_prise_en_compte", operator: "GTE" as const, value: dateFrom },
-      { propertyName: "date_de_prise_en_compte", operator: "LTE" as const, value: dateTo },
-      ...(ownerId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }] : []),
-    ],
-  }))
+  const filters: SearchFilterGroup[] = [
+    {
+      filters: [
+        { propertyName: "attribution", operator: "IN", values: attributions },
+        ...(ownerId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }] : []),
+      ],
+    },
+  ]
 
-  const cacheKey = `attribution_deals_${attributions.join("_")}_${dateFrom}_${dateTo}_${ownerId ?? "all"}`
+  const cacheKey = `attribution_deals_${attributions.join("_")}_${ownerId ?? "all"}`
   const raw = await hubspotSearch<HubSpotDeal>("deals", {
     filterGroups: filters,
     properties: [...DEAL_PROPERTIES],
-    sorts: [{ propertyName: "date_de_prise_en_compte", direction: "DESCENDING" }],
+    sorts: [{ propertyName: "hs_lastmodifieddate", direction: "DESCENDING" }],
   }, cacheKey)
 
-  return raw.map(transformDeal)
+  const deals = raw.map(transformDeal)
+
+  // Client-side date filtering on date_de_prise_en_compte
+  return deals.filter((d) => {
+    const opDate = d.operationDate ?? d.closeDate ?? d.createdAt
+    if (!opDate) return false
+    const date = opDate.slice(0, 10) // YYYY-MM-DD
+    return date >= dateFrom && date <= dateTo
+  })
 }
 
 // Fetch CSM-relevant deals (Upsell + Churn + Downsell) within a date range
@@ -100,12 +104,10 @@ export async function fetchCsmMovements(dateFrom: string, dateTo: string, ownerI
 }
 
 // Fetch deals with renewals in a date range
-// Renewal deals are in the Sales pipeline with renewall_date set
 export async function fetchRenewalDeals(dateFrom: string, dateTo: string, ownerId?: string): Promise<Deal[]> {
   const filters: SearchFilterGroup[] = [
     {
       filters: [
-        { propertyName: "pipeline", operator: "EQ", value: PIPELINES.SALES },
         { propertyName: "renewall_date", operator: "GTE", value: dateFrom },
         { propertyName: "renewall_date", operator: "LTE", value: dateTo },
         ...(ownerId ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }] : []),

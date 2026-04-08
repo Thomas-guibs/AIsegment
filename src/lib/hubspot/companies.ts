@@ -22,37 +22,24 @@ function transformCompany(raw: HubSpotCompany): Company {
 }
 
 // Fetch all customer companies managed by CSM team
+// Uses IN operator to stay within HubSpot's 5 filter group limit
 export async function fetchCustomerCompanies(ownerId?: string): Promise<Company[]> {
-  const ownerFilter = ownerId
-    ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }]
-    : CSM_TEAM_IDS.map((id) => ({
-        propertyName: "hubspot_owner_id",
-        operator: "EQ" as const,
-        value: id,
-      }))
-
-  // If filtering by all CSMs, we need separate filter groups (OR logic)
-  const filterGroups = ownerId
-    ? [
-        {
-          filters: [
-            { propertyName: "lifecyclestage", operator: "EQ" as const, value: "customer" },
-            { propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId },
-          ],
-        },
-      ]
-    : CSM_TEAM_IDS.map((id) => ({
-        filters: [
-          { propertyName: "lifecyclestage", operator: "EQ" as const, value: "customer" },
-          { propertyName: "hubspot_owner_id", operator: "EQ" as const, value: id },
-        ],
-      }))
+  const filterGroups = [
+    {
+      filters: [
+        { propertyName: "lifecyclestage", operator: "EQ" as const, value: "customer" },
+        ...(ownerId
+          ? [{ propertyName: "hubspot_owner_id", operator: "EQ" as const, value: ownerId }]
+          : [{ propertyName: "hubspot_owner_id", operator: "IN" as const, values: CSM_TEAM_IDS }]
+        ),
+      ],
+    },
+  ]
 
   const cacheKey = `customer_companies_${ownerId ?? "all"}`
   const raw = await hubspotSearch<HubSpotCompany>("companies", {
     filterGroups,
     properties: [...COMPANY_PROPERTIES],
-    sorts: [{ propertyName: "mrr", direction: "DESCENDING" }],
   }, cacheKey)
 
   return raw.map(transformCompany)

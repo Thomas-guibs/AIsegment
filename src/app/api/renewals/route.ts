@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic"
+
 import { NextRequest, NextResponse } from "next/server"
 import { fetchRenewalDeals, enrichDealsWithCompanies } from "@/lib/hubspot/deals"
 import { format, addDays, subMonths } from "date-fns"

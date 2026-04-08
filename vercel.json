@@ -1,7 +1,5 @@
 {
   "version": 2,
-  "name": "aisegment-prompt-tester",
-  "buildCommand": null,
-  "outputDirectory": ".",
-  "cleanUrls": true
+  "name": "csm-os",
+  "framework": "nextjs"
 }

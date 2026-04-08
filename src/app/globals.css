@@ -2,6 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================
+   Theme CSS Variables — Dark (default) & Light
+   ============================================ */
+:root,
+.dark {
+  --color-background: #0A0A0F;
+  --color-background-secondary: #12121A;
+  --color-card: #1E1E2E;
+  --color-card-border: #2A2A3C;
+  --color-card-hover: #252538;
+  --color-text-primary: #E2E8F0;
+  --color-text-secondary: #94A3B8;
+  --color-text-muted: #64748B;
+}
+
+.light {
+  --color-background: #F8FAFC;
+  --color-background-secondary: #FFFFFF;
+  --color-card: #FFFFFF;
+  --color-card-border: #E2E8F0;
+  --color-card-hover: #F1F5F9;
+  --color-text-primary: #0F172A;
+  --color-text-secondary: #475569;
+  --color-text-muted: #94A3B8;
+}
+
 @layer base {
   * {
     @apply border-card-border;

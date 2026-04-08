@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import { Suspense } from "react"
 import { Sidebar } from "@/components/layout/Sidebar"
+import { ThemeProvider } from "@/components/layout/ThemeProvider"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -14,14 +15,16 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="fr" className="dark">
+    <html lang="fr" suppressHydrationWarning>
       <body className="font-sans">
-        <div className="flex h-screen overflow-hidden">
-          <Suspense>
-            <Sidebar />
-          </Suspense>
-          <main className="flex-1 overflow-y-auto">{children}</main>
-        </div>
+        <ThemeProvider>
+          <div className="flex h-screen overflow-hidden">
+            <Suspense>
+              <Sidebar />
+            </Suspense>
+            <main className="flex-1 overflow-y-auto">{children}</main>
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   )

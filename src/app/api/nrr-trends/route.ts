@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { fetchCustomerCompanies } from "@/lib/hubspot/companies"
 import { fetchAttributionDeals } from "@/lib/hubspot/deals"
 import type { Deal } from "@/lib/types"
-import { ATTRIBUTION, CSM_TEAM } from "@/lib/constants"
+import { ATTRIBUTION, CSM_TEAM, SALES_STAGES } from "@/lib/constants"
 import {
   startOfMonth,
   subMonths,
@@ -12,7 +12,7 @@ import {
   format,
 } from "date-fns"
 
-// Acquisition attributions = new business that brought a company to the CSM
+// Acquisition attributions = new business
 const ACQUISITION_ATTRIBUTIONS = [
   ATTRIBUTION.PARTNERS,
   ATTRIBUTION.HUNT,
@@ -22,15 +22,35 @@ const ACQUISITION_ATTRIBUTIONS = [
   ATTRIBUTION.PLG,
 ]
 
+// "Closed Won" stages in HubSpot (inverted naming: closedlost = Closed Won)
+const CLOSED_WON_STAGES: string[] = [SALES_STAGES.CLOSED_WON, SALES_STAGES.PAIEMENT_RECU]
+
+// CSMs to include in the analysis (exclude backup/inactive)
+const ACTIVE_CSMS = CSM_TEAM.filter(
+  (c) => c.id !== "1949410186" && c.id !== "44919918" // Exclude Antoine Rivaud & Thomas Prouveur
+)
+
+interface DealDetail {
+  id: string
+  name: string
+  amount: number
+  attribution: string
+  companyName?: string
+  ownerId: string | null
+  operationDate: string | null
+  stage: string
+}
+
 interface NrrMonthData {
-  month: string        // "2026-01"
-  monthLabel: string   // "Jan 2026"
+  month: string
+  monthLabel: string
   startingMrr: number
   upsell: number
   churn: number
   downsell: number
-  newBusiness: number  // MRR from new acquisitions (to subtract from starting)
-  nrr: number          // percentage
+  newBusiness: number
+  nrr: number
+  deals: DealDetail[] // individual deals for this month
 }
 
 interface CsmNrrTrend {
@@ -65,15 +85,12 @@ export async function GET(request: NextRequest) {
 
     // Fetch all data in parallel
     const [companies, allMovements, allAcquisitions] = await Promise.all([
-      // Current portfolio per CSM
       fetchCustomerCompanies(),
-      // All Upsell/Churn/Downsell deals in the period
       fetchAttributionDeals(
         [ATTRIBUTION.UPSELL, ATTRIBUTION.CHURN, ATTRIBUTION.DOWNSELL],
         globalDateFrom,
         globalDateTo
       ),
-      // All acquisition deals in the period (new business)
       fetchAttributionDeals(
         ACQUISITION_ATTRIBUTIONS,
         globalDateFrom,
@@ -81,56 +98,73 @@ export async function GET(request: NextRequest) {
       ),
     ])
 
-    const getDealDate = (d: Deal): string | null =>
-      d.operationDate?.slice(0, 10) ?? d.closeDate?.slice(0, 10) ?? d.createdAt?.slice(0, 10) ?? null
+    // --- Filters ---
+    // Upsell: only count deals in Closed Won stage with operation date in month
+    const isValidUpsell = (d: Deal): boolean =>
+      d.attribution === ATTRIBUTION.UPSELL &&
+      CLOSED_WON_STAGES.includes(d.stage) &&
+      d.operationDate != null
 
-    const getMonthKey = (dateStr: string): string => dateStr.slice(0, 7)
+    // Churn/Downsell: use operation date
+    const isValidChurnOrDownsell = (d: Deal): boolean =>
+      (d.attribution === ATTRIBUTION.CHURN || d.attribution === ATTRIBUTION.DOWNSELL) &&
+      d.operationDate != null
 
-    // Build NRR for each CSM
+    const getOperationMonth = (d: Deal): string | null =>
+      d.operationDate?.slice(0, 7) ?? null
+
+    const toDealDetail = (d: Deal): DealDetail => ({
+      id: d.id,
+      name: d.name,
+      amount: d.amount,
+      attribution: d.attribution ?? "",
+      companyName: d.companyName,
+      ownerId: d.ownerId,
+      operationDate: d.operationDate,
+      stage: d.stage,
+    })
+
+    // --- Per-CSM NRR ---
     const csmTrends: CsmNrrTrend[] = []
 
-    for (const csm of CSM_TEAM) {
-      // Current MRR for this CSM (companies where proprietaire_de_l_entreprise__csm_ = csm.id)
+    for (const csm of ACTIVE_CSMS) {
       const csmCompanies = companies.filter((c) => c.ownerId === csm.id)
       const currentMrr = csmCompanies.reduce((sum, c) => sum + c.mrr, 0)
 
-      // Deals owned by this CSM
       const csmMovements = allMovements.filter((d) => d.ownerId === csm.id)
       const csmAcquisitions = allAcquisitions.filter((d) => d.ownerId === csm.id)
 
-      // Group movements by month
+      // Group by month
       const monthlyUpsell: Record<string, number> = {}
       const monthlyChurn: Record<string, number> = {}
       const monthlyDownsell: Record<string, number> = {}
       const monthlyNewBiz: Record<string, number> = {}
+      const monthlyDeals: Record<string, DealDetail[]> = {}
 
       for (const deal of csmMovements) {
-        const dateStr = getDealDate(deal)
-        if (!dateStr) continue
-        const mk = getMonthKey(dateStr)
+        const mk = getOperationMonth(deal)
+        if (!mk) continue
+        if (!monthlyDeals[mk]) monthlyDeals[mk] = []
 
-        if (deal.attribution === ATTRIBUTION.UPSELL) {
+        if (isValidUpsell(deal)) {
           monthlyUpsell[mk] = (monthlyUpsell[mk] ?? 0) + Math.abs(deal.amount)
-        } else if (deal.attribution === ATTRIBUTION.CHURN) {
+          monthlyDeals[mk].push(toDealDetail(deal))
+        } else if (deal.attribution === ATTRIBUTION.CHURN && deal.operationDate) {
           monthlyChurn[mk] = (monthlyChurn[mk] ?? 0) + Math.abs(deal.amount)
-        } else if (deal.attribution === ATTRIBUTION.DOWNSELL) {
+          monthlyDeals[mk].push(toDealDetail(deal))
+        } else if (deal.attribution === ATTRIBUTION.DOWNSELL && deal.operationDate) {
           monthlyDownsell[mk] = (monthlyDownsell[mk] ?? 0) + Math.abs(deal.amount)
+          monthlyDeals[mk].push(toDealDetail(deal))
         }
       }
 
       for (const deal of csmAcquisitions) {
-        const dateStr = getDealDate(deal)
-        if (!dateStr) continue
-        const mk = getMonthKey(dateStr)
+        const mk = getOperationMonth(deal)
+        if (!mk) continue
         monthlyNewBiz[mk] = (monthlyNewBiz[mk] ?? 0) + Math.abs(deal.amount)
       }
 
-      // Calculate starting MRR for each month by working backwards from current MRR.
-      // Starting MRR of month M = current MRR
-      //   - sum of upsells from M to now (they increased MRR)
-      //   + sum of churns from M to now (they decreased MRR, so add back)
-      //   + sum of downsells from M to now (they decreased MRR, so add back)
-      //   - sum of new business from M to now (they added new MRR)
+      // Calculate starting MRR per month (working backwards from current)
       const monthData: NrrMonthData[] = []
 
       for (let i = 0; i < months.length; i++) {
@@ -142,12 +176,7 @@ export async function GET(request: NextRequest) {
         const downsell = monthlyDownsell[mk] ?? 0
         const newBiz = monthlyNewBiz[mk] ?? 0
 
-        // Sum of all net changes AFTER this month (from month i+1 to end)
-        let futureUpsell = 0
-        let futureChurn = 0
-        let futureDownsell = 0
-        let futureNewBiz = 0
-
+        let futureUpsell = 0, futureChurn = 0, futureDownsell = 0, futureNewBiz = 0
         for (let j = i; j < months.length; j++) {
           const fmk = months[j].key
           futureUpsell += monthlyUpsell[fmk] ?? 0
@@ -156,10 +185,7 @@ export async function GET(request: NextRequest) {
           futureNewBiz += monthlyNewBiz[fmk] ?? 0
         }
 
-        // Starting MRR = current MRR - future upsells + future churns + future downsells - future new biz
         const startingMrr = currentMrr - futureUpsell + futureChurn + futureDownsell - futureNewBiz
-
-        // NRR = (starting + upsell - churn - downsell) / starting * 100
         const nrr = startingMrr > 0
           ? ((startingMrr + upsell - churn - downsell) / startingMrr) * 100
           : 100
@@ -167,12 +193,13 @@ export async function GET(request: NextRequest) {
         monthData.push({
           month: mk,
           monthLabel: month.label,
-          startingMrr,
-          upsell,
-          churn,
-          downsell,
-          newBusiness: newBiz,
+          startingMrr: Math.round(startingMrr * 100) / 100,
+          upsell: Math.round(upsell * 100) / 100,
+          churn: Math.round(churn * 100) / 100,
+          downsell: Math.round(downsell * 100) / 100,
+          newBusiness: Math.round(newBiz * 100) / 100,
           nrr: Math.round(nrr * 100) / 100,
+          deals: monthlyDeals[mk] ?? [],
         })
       }
 
@@ -184,7 +211,7 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // Also compute global NRR (all companies, not just CSM team)
+    // --- Global NRR ---
     const totalCurrentMrr = companies.reduce((sum, c) => sum + c.mrr, 0)
     const globalMonthData: NrrMonthData[] = []
 
@@ -192,19 +219,27 @@ export async function GET(request: NextRequest) {
     const gMonthlyChurn: Record<string, number> = {}
     const gMonthlyDownsell: Record<string, number> = {}
     const gMonthlyNewBiz: Record<string, number> = {}
+    const gMonthlyDeals: Record<string, DealDetail[]> = {}
 
     for (const deal of allMovements) {
-      const dateStr = getDealDate(deal)
-      if (!dateStr) continue
-      const mk = getMonthKey(dateStr)
-      if (deal.attribution === ATTRIBUTION.UPSELL) gMonthlyUpsell[mk] = (gMonthlyUpsell[mk] ?? 0) + Math.abs(deal.amount)
-      else if (deal.attribution === ATTRIBUTION.CHURN) gMonthlyChurn[mk] = (gMonthlyChurn[mk] ?? 0) + Math.abs(deal.amount)
-      else if (deal.attribution === ATTRIBUTION.DOWNSELL) gMonthlyDownsell[mk] = (gMonthlyDownsell[mk] ?? 0) + Math.abs(deal.amount)
+      const mk = getOperationMonth(deal)
+      if (!mk) continue
+      if (!gMonthlyDeals[mk]) gMonthlyDeals[mk] = []
+
+      if (isValidUpsell(deal)) {
+        gMonthlyUpsell[mk] = (gMonthlyUpsell[mk] ?? 0) + Math.abs(deal.amount)
+        gMonthlyDeals[mk].push(toDealDetail(deal))
+      } else if (deal.attribution === ATTRIBUTION.CHURN && deal.operationDate) {
+        gMonthlyChurn[mk] = (gMonthlyChurn[mk] ?? 0) + Math.abs(deal.amount)
+        gMonthlyDeals[mk].push(toDealDetail(deal))
+      } else if (deal.attribution === ATTRIBUTION.DOWNSELL && deal.operationDate) {
+        gMonthlyDownsell[mk] = (gMonthlyDownsell[mk] ?? 0) + Math.abs(deal.amount)
+        gMonthlyDeals[mk].push(toDealDetail(deal))
+      }
     }
     for (const deal of allAcquisitions) {
-      const dateStr = getDealDate(deal)
-      if (!dateStr) continue
-      const mk = getMonthKey(dateStr)
+      const mk = getOperationMonth(deal)
+      if (!mk) continue
       gMonthlyNewBiz[mk] = (gMonthlyNewBiz[mk] ?? 0) + Math.abs(deal.amount)
     }
 
@@ -233,16 +268,17 @@ export async function GET(request: NextRequest) {
       globalMonthData.push({
         month: mk,
         monthLabel: month.label,
-        startingMrr,
-        upsell,
-        churn,
-        downsell,
-        newBusiness: newBiz,
+        startingMrr: Math.round(startingMrr * 100) / 100,
+        upsell: Math.round(upsell * 100) / 100,
+        churn: Math.round(churn * 100) / 100,
+        downsell: Math.round(downsell * 100) / 100,
+        newBusiness: Math.round(newBiz * 100) / 100,
         nrr: Math.round(nrr * 100) / 100,
+        deals: gMonthlyDeals[mk] ?? [],
       })
     }
 
-    // Build chart-ready data: each row = { month, monthLabel, Global, Farah, Antoine, ... }
+    // Chart-ready data
     const chartData = months.map((month, i) => {
       const row: Record<string, unknown> = {
         month: month.key,

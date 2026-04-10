@@ -1,17 +1,127 @@
 "use client"
 
-import { Suspense, useState } from "react"
+import { Suspense, useState, useMemo } from "react"
 import Link from "next/link"
 import { Header } from "@/components/layout/Header"
 import { KpiCard, KpiCardSkeleton } from "@/components/charts/KpiCard"
+import { BarChartComponent } from "@/components/charts/BarChart"
 import { HeatmapCalendar } from "@/components/charts/HeatmapCalendar"
 import { useFetch } from "@/lib/hooks"
 import type { RenewalDeal, RenewalKpis } from "@/lib/types"
 import { cn, formatCurrency, formatDateFR, daysFromNow } from "@/lib/utils"
 import { getCsmName, CUSTOMER_STAGE_LABELS } from "@/lib/constants"
 import { CalendarDays, Clock, Calendar, BarChart3 } from "lucide-react"
-import { format } from "date-fns"
+import { format, startOfQuarter } from "date-fns"
 import { fr } from "date-fns/locale"
+
+const WON_STAGES = ["closedlost", "143474109", "878353129"]
+const CHURN_STAGES = ["1220133077", "124302781"]
+
+function RenewalStats({ deals }: { deals: RenewalDeal[] }) {
+  const [statMode, setStatMode] = useState<"month" | "quarter" | "year">("quarter")
+
+  const chartData = useMemo(() => {
+    const buckets: Record<string, { won: number; churn: number; open: number; wonCount: number; churnCount: number; openCount: number }> = {}
+
+    for (const deal of deals) {
+      if (!deal.renewalDate) continue
+      const d = new Date(deal.renewalDate)
+      let key: string
+      if (statMode === "month") {
+        key = format(d, "MMM yy", { locale: fr })
+      } else if (statMode === "quarter") {
+        const q = Math.ceil((d.getMonth() + 1) / 3)
+        key = `Q${q} ${d.getFullYear()}`
+      } else {
+        key = `${d.getFullYear()}`
+      }
+
+      if (!buckets[key]) buckets[key] = { won: 0, churn: 0, open: 0, wonCount: 0, churnCount: 0, openCount: 0 }
+
+      if (WON_STAGES.includes(deal.stage)) {
+        buckets[key].won += Math.abs(deal.amount)
+        buckets[key].wonCount++
+      } else if (CHURN_STAGES.includes(deal.stage)) {
+        buckets[key].churn += Math.abs(deal.amount)
+        buckets[key].churnCount++
+      } else {
+        buckets[key].open += Math.abs(deal.amount)
+        buckets[key].openCount++
+      }
+    }
+
+    return Object.entries(buckets).map(([label, data]) => ({
+      label,
+      "Renouvelé": data.won,
+      "Churn": -data.churn,
+      "En cours": data.open,
+      wonCount: data.wonCount,
+      churnCount: data.churnCount,
+      openCount: data.openCount,
+    }))
+  }, [deals, statMode])
+
+  // Summary totals
+  const totals = useMemo(() => {
+    let won = 0, churn = 0, open = 0
+    for (const d of chartData) {
+      won += d["Renouvelé"]
+      churn += Math.abs(d["Churn"])
+      open += d["En cours"]
+    }
+    return { won, churn, open }
+  }, [chartData])
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-medium text-text-secondary">
+          Statistiques renouvellements
+        </h3>
+        <div className="flex items-center gap-1 bg-background rounded-lg p-0.5 border border-card-border">
+          {(["month", "quarter", "year"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setStatMode(m)}
+              className={cn("px-2.5 py-1 text-2xs rounded-md font-medium transition-colors", statMode === m ? "bg-accent text-white" : "text-text-secondary hover:text-text-primary")}
+            >
+              {m === "month" ? "Mois" : m === "quarter" ? "Trimestre" : "Année"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Summary */}
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="bg-positive/5 rounded-lg p-3 border border-positive/10">
+          <div className="text-2xs text-positive font-medium mb-0.5">Renouvelés</div>
+          <div className="text-lg font-mono font-semibold text-positive">{formatCurrency(totals.won, true)}</div>
+        </div>
+        <div className="bg-negative/5 rounded-lg p-3 border border-negative/10">
+          <div className="text-2xs text-negative font-medium mb-0.5">Churn</div>
+          <div className="text-lg font-mono font-semibold text-negative">{formatCurrency(totals.churn, true)}</div>
+        </div>
+        <div className="bg-warning/5 rounded-lg p-3 border border-warning/10">
+          <div className="text-2xs text-warning font-medium mb-0.5">En cours</div>
+          <div className="text-lg font-mono font-semibold text-warning">{formatCurrency(totals.open, true)}</div>
+        </div>
+      </div>
+
+      {/* Chart */}
+      <BarChartComponent
+        data={chartData}
+        series={[
+          { key: "Renouvelé", label: "Renouvelé", color: "#2BA85D" },
+          { key: "En cours", label: "En cours", color: "#E8923A" },
+          { key: "Churn", label: "Churn", color: "#DC3545" },
+        ]}
+        xKey="label"
+        stacked
+        height={250}
+      />
+    </div>
+  )
+}
 
 function RenewalsContent() {
   const { data, loading } = useFetch<{ deals: RenewalDeal[]; kpis: RenewalKpis }>("/api/renewals", { days: "365" })
@@ -93,6 +203,11 @@ function RenewalsContent() {
           </>
         )}
       </div>
+
+      {/* Period stats: won vs churn by month/quarter/year */}
+      {!loading && deals.length > 0 && (
+        <RenewalStats deals={deals} />
+      )}
 
       {/* Heatmap + Side panel */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

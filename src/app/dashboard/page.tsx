@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useState } from "react"
+import { Suspense } from "react"
 import { Header } from "@/components/layout/Header"
 import { KpiCard, KpiCardSkeleton } from "@/components/charts/KpiCard"
 import { BarChartComponent } from "@/components/charts/BarChart"
@@ -18,19 +18,7 @@ import {
   TrendingUp,
   Layers,
   CalendarClock,
-  ChevronDown,
-  ChevronUp,
 } from "lucide-react"
-
-interface DealDetail {
-  id: string
-  name: string
-  amount: number
-  attribution: string
-  companyName?: string
-  ownerId: string | null
-  operationDate: string | null
-}
 
 interface NrrMonthData {
   month: string
@@ -40,20 +28,11 @@ interface NrrMonthData {
   churn: number
   downsell: number
   nrr: number
-  deals: DealDetail[]
-}
-
-interface CsmNrrTrend {
-  csmId: string
-  csmName: string
-  color: string
-  months: NrrMonthData[]
 }
 
 interface NrrTrendsResponse {
   chartData: Record<string, unknown>[]
   global: NrrMonthData[]
-  perCsm: CsmNrrTrend[]
 }
 
 // Active CSMs for chart series (must match API filter)
@@ -68,9 +47,6 @@ function DashboardContent() {
   const { data: kpis, loading: kpisLoading } = useFetch<DashboardKpis>("/api/kpis")
   const { data: dealsData, loading: dealsLoading } = useFetch<{ deals: Deal[] }>("/api/deals")
   const { data: nrrTrends, loading: nrrLoading } = useFetch<NrrTrendsResponse>("/api/nrr-trends")
-  const [expandedMonth, setExpandedMonth] = useState<string | null>(null)
-  const [expandedCsm, setExpandedCsm] = useState<string | null>(null)
-
   return (
     <div className="p-6 space-y-6">
       {/* KPI Cards */}
@@ -165,129 +141,43 @@ function DashboardContent() {
         </div>
       </div>
 
-      {/* NRR Detail — Transactions per CSM per month */}
-      {!nrrLoading && nrrTrends?.perCsm && (
-        <div className="space-y-3">
-          <h3 className="text-sm font-medium text-text-secondary">
-            Detail NRR — Transactions par CSM par mois
-          </h3>
-          {nrrTrends.perCsm.map((csm) => (
-            <div key={csm.csmId} className="card p-0 overflow-hidden">
-              <button
-                onClick={() => setExpandedCsm(expandedCsm === csm.csmId ? null : csm.csmId)}
-                className="w-full flex items-center justify-between px-4 py-3 hover:bg-card-hover transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-3 h-3 rounded-full"
-                    style={{ backgroundColor: csm.color }}
-                  />
-                  <span className="text-sm font-medium text-text-primary">{csm.csmName}</span>
-                </div>
-                <div className="flex items-center gap-4">
-                  {csm.months.map((m) => (
-                    <span
-                      key={m.month}
-                      className={cn(
-                        "text-xs font-mono font-medium",
-                        m.nrr >= 100 ? "text-positive" : "text-negative"
-                      )}
-                    >
-                      {m.nrr.toFixed(1)}%
-                    </span>
-                  ))}
-                  {expandedCsm === csm.csmId ? (
-                    <ChevronUp className="w-4 h-4 text-text-muted" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4 text-text-muted" />
-                  )}
-                </div>
-              </button>
-
-              {expandedCsm === csm.csmId && (
-                <div className="border-t border-card-border animate-fade-in">
-                  <table className="w-full">
-                    <thead className="bg-background/50">
-                      <tr>
-                        <th className="px-4 py-2 text-left text-xs text-text-muted">Mois</th>
-                        <th className="px-4 py-2 text-right text-xs text-text-muted">MRR Debut</th>
-                        <th className="px-4 py-2 text-right text-xs text-text-muted">Upsell</th>
-                        <th className="px-4 py-2 text-right text-xs text-text-muted">Churn</th>
-                        <th className="px-4 py-2 text-right text-xs text-text-muted">Downsell</th>
-                        <th className="px-4 py-2 text-right text-xs text-text-muted">NRR</th>
-                        <th className="px-4 py-2 text-right text-xs text-text-muted">Deals</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-card-border">
-                      {csm.months.map((m) => (
-                        <>
-                          <tr
-                            key={m.month}
-                            className="hover:bg-card-hover cursor-pointer transition-colors"
-                            onClick={() => setExpandedMonth(expandedMonth === `${csm.csmId}-${m.month}` ? null : `${csm.csmId}-${m.month}`)}
-                          >
-                            <td className="px-4 py-2 text-sm text-text-primary font-medium">{m.monthLabel}</td>
-                            <td className="px-4 py-2 text-sm font-mono text-text-secondary text-right">{formatCurrency(m.startingMrr, true)}</td>
-                            <td className="px-4 py-2 text-sm font-mono text-positive text-right">
-                              {m.upsell > 0 ? `+${formatCurrency(m.upsell, true)}` : "-"}
-                            </td>
-                            <td className="px-4 py-2 text-sm font-mono text-negative text-right">
-                              {m.churn > 0 ? `-${formatCurrency(m.churn, true)}` : "-"}
-                            </td>
-                            <td className="px-4 py-2 text-sm font-mono text-warning text-right">
-                              {m.downsell > 0 ? `-${formatCurrency(m.downsell, true)}` : "-"}
-                            </td>
-                            <td className={cn("px-4 py-2 text-sm font-mono font-medium text-right", m.nrr >= 100 ? "text-positive" : "text-negative")}>
-                              {m.nrr.toFixed(1)}%
-                            </td>
-                            <td className="px-4 py-2 text-sm text-text-muted text-right">
-                              {m.deals.length > 0 ? (
-                                <span className="flex items-center justify-end gap-1">
-                                  {m.deals.length}
-                                  {expandedMonth === `${csm.csmId}-${m.month}` ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                </span>
-                              ) : "0"}
-                            </td>
-                          </tr>
-                          {expandedMonth === `${csm.csmId}-${m.month}` && m.deals.length > 0 && (
-                            <tr key={`${m.month}-deals`}>
-                              <td colSpan={7} className="px-4 py-0">
-                                <div className="py-2 pl-4 space-y-1 border-l-2 border-card-border ml-2">
-                                  {m.deals.map((deal) => (
-                                    <div key={deal.id} className="flex items-center justify-between text-xs py-1">
-                                      <div className="flex items-center gap-2">
-                                        <span
-                                          className={cn(
-                                            "badge",
-                                            deal.attribution === "Upsell" && "badge-upsell",
-                                            deal.attribution === "Churn" && "badge-churn",
-                                            deal.attribution === "Downsell" && "badge-downsell"
-                                          )}
-                                        >
-                                          {deal.attribution}
-                                        </span>
-                                        <span className="text-text-primary">{deal.companyName ?? deal.name}</span>
-                                      </div>
-                                      <div className="flex items-center gap-3">
-                                        <span className="text-text-muted">{deal.operationDate?.slice(0, 10)}</span>
-                                        <span className={cn("font-mono font-medium", deal.amount >= 0 ? "text-positive" : "text-negative")}>
-                                          {formatCurrency(deal.amount)}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          ))}
+      {/* Monthly detail table */}
+      {!nrrLoading && nrrTrends?.global && (
+        <div className="card p-0 overflow-hidden">
+          <div className="px-4 py-3 border-b border-card-border">
+            <h3 className="text-sm font-medium text-text-secondary">Detail mensuel</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-row-alt">
+                <tr>
+                  <th className="px-4 py-2.5 text-left text-2xs text-text-muted font-medium">Mois</th>
+                  <th className="px-4 py-2.5 text-right text-2xs text-text-muted font-medium">MRR Debut</th>
+                  <th className="px-4 py-2.5 text-right text-2xs text-text-muted font-medium">Upsell</th>
+                  <th className="px-4 py-2.5 text-right text-2xs text-text-muted font-medium">Churn</th>
+                  <th className="px-4 py-2.5 text-right text-2xs text-text-muted font-medium">Downsell</th>
+                  <th className="px-4 py-2.5 text-right text-2xs text-text-muted font-medium">Net</th>
+                  <th className="px-4 py-2.5 text-right text-2xs text-text-muted font-medium">NRR</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-card-border">
+                {nrrTrends.global.map((m) => {
+                  const net = m.upsell - m.churn - m.downsell
+                  return (
+                    <tr key={m.month} className="hover:bg-card-hover transition-colors">
+                      <td className="px-4 py-2.5 text-[13px] font-medium text-text-primary">{m.monthLabel}</td>
+                      <td className="px-4 py-2.5 text-[13px] font-mono text-text-secondary text-right">{formatCurrency(m.startingMrr, true)}</td>
+                      <td className="px-4 py-2.5 text-[13px] font-mono text-positive text-right">{m.upsell > 0 ? `+${formatCurrency(m.upsell, true)}` : "—"}</td>
+                      <td className="px-4 py-2.5 text-[13px] font-mono text-negative text-right">{m.churn > 0 ? `-${formatCurrency(m.churn, true)}` : "—"}</td>
+                      <td className="px-4 py-2.5 text-[13px] font-mono text-warning text-right">{m.downsell > 0 ? `-${formatCurrency(m.downsell, true)}` : "—"}</td>
+                      <td className={cn("px-4 py-2.5 text-[13px] font-mono font-medium text-right", net >= 0 ? "text-positive" : "text-negative")}>{formatCurrency(net, true)}</td>
+                      <td className={cn("px-4 py-2.5 text-[13px] font-mono font-semibold text-right", m.nrr >= 100 ? "text-positive" : "text-negative")}>{m.nrr.toFixed(1)}%</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

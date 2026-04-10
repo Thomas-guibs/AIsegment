@@ -12,6 +12,7 @@ import {
   Users,
   TrendingUp,
   BarChart3,
+  Activity,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react"
@@ -20,6 +21,7 @@ const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Comptes", href: "/accounts", icon: Building2 },
   { name: "Pipeline", href: "/pipeline", icon: GitBranch },
+  { name: "NRR Detail", href: "/nrr", icon: Activity },
   { name: "Forecast", href: "/forecast", icon: BarChart3 },
   { name: "Renouvellements", href: "/renewals", icon: CalendarClock },
   { name: "Portefeuille", href: "/portfolio", icon: Users },

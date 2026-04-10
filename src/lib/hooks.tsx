@@ -41,15 +41,19 @@ export function useFetch<T>(url: string, params?: Record<string, string>): UseFe
   const csmId = searchParams.get("csmId") ?? ""
   const { tick } = useRefresh()
 
+  // Stabilize params to avoid infinite re-render loops
+  const paramsString = params ? JSON.stringify(params) : ""
+
   const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
+      const extraParams = paramsString ? JSON.parse(paramsString) : {}
       const queryParams = new URLSearchParams({
         period,
         ...(csmId ? { csmId } : {}),
-        ...params,
+        ...extraParams,
       })
 
       const response = await fetch(`${url}?${queryParams.toString()}`)
@@ -64,7 +68,7 @@ export function useFetch<T>(url: string, params?: Record<string, string>): UseFe
     } finally {
       setLoading(false)
     }
-  }, [url, period, csmId, params, tick])
+  }, [url, period, csmId, paramsString, tick])
 
   useEffect(() => {
     fetchData()

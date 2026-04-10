@@ -3,29 +3,39 @@
 @tailwind utilities;
 
 /* ============================================
-   Theme CSS Variables — Dark (default) & Light
+   CSM OS Design System — Planhat-inspired
+   Light-first, clean, warm, data-dense
    ============================================ */
-:root,
-.dark {
-  --color-background: #0A0A0F;
-  --color-background-secondary: #12121A;
-  --color-card: #1E1E2E;
-  --color-card-border: #2A2A3C;
-  --color-card-hover: #252538;
-  --color-text-primary: #E2E8F0;
-  --color-text-secondary: #94A3B8;
-  --color-text-muted: #64748B;
-}
 
+:root,
 .light {
-  --color-background: #F8FAFC;
+  --color-background: #FAFAFA;
   --color-background-secondary: #FFFFFF;
   --color-card: #FFFFFF;
-  --color-card-border: #E2E8F0;
-  --color-card-hover: #F1F5F9;
-  --color-text-primary: #0F172A;
-  --color-text-secondary: #475569;
-  --color-text-muted: #94A3B8;
+  --color-card-border: #E8E8E8;
+  --color-card-hover: #F5F5F5;
+  --color-text-primary: #1A1A1A;
+  --color-text-secondary: #6B6B6B;
+  --color-text-muted: #A3A3A3;
+  --color-sidebar-bg: #FAF8F6;
+  --color-sidebar-active: #F0ECE8;
+  --color-accent-subtle: #F0ECE8;
+  --color-row-alt: #FAFAFA;
+}
+
+.dark {
+  --color-background: #0F0F0F;
+  --color-background-secondary: #171717;
+  --color-card: #1C1C1C;
+  --color-card-border: #2A2A2A;
+  --color-card-hover: #222222;
+  --color-text-primary: #E5E5E5;
+  --color-text-secondary: #999999;
+  --color-text-muted: #666666;
+  --color-sidebar-bg: #141414;
+  --color-sidebar-active: #1F1F1F;
+  --color-accent-subtle: #1F1F1F;
+  --color-row-alt: #141414;
 }
 
 @layer base {
@@ -35,16 +45,16 @@
 
   body {
     @apply bg-background text-text-primary antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
-  /* Custom scrollbar */
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-background;
+    background: transparent;
   }
 
   ::-webkit-scrollbar-thumb {
@@ -58,66 +68,37 @@
 
 @layer components {
   .card {
-    @apply bg-card border border-card-border rounded-card p-5 shadow-lg shadow-black/10;
+    @apply bg-card border border-card-border rounded-xl p-5;
   }
 
   .card-hover {
-    @apply card transition-colors duration-200 hover:bg-card-hover;
+    @apply card transition-colors duration-150 hover:bg-card-hover;
   }
 
   .badge {
-    @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium;
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium;
   }
 
   .badge-upsell {
-    @apply badge bg-positive/15 text-positive;
+    @apply badge bg-emerald-50 text-emerald-600;
   }
 
   .badge-churn {
-    @apply badge bg-negative/15 text-negative;
+    @apply badge bg-red-50 text-red-600;
   }
 
   .badge-downsell {
-    @apply badge bg-warning/15 text-warning;
+    @apply badge bg-amber-50 text-amber-600;
   }
 
   .skeleton {
-    @apply animate-pulse bg-card-border rounded;
+    @apply animate-pulse rounded-lg;
+    background-color: var(--color-card-border);
   }
 }
 
-/* Geist font - loaded via next/font or CDN fallback */
-@font-face {
-  font-family: 'Geist';
-  src: url('https://cdn.jsdelivr.net/npm/geist@1.2.0/dist/fonts/geist-sans/Geist-Regular.woff2') format('woff2');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Geist';
-  src: url('https://cdn.jsdelivr.net/npm/geist@1.2.0/dist/fonts/geist-sans/Geist-Medium.woff2') format('woff2');
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Geist';
-  src: url('https://cdn.jsdelivr.net/npm/geist@1.2.0/dist/fonts/geist-sans/Geist-SemiBold.woff2') format('woff2');
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Geist';
-  src: url('https://cdn.jsdelivr.net/npm/geist@1.2.0/dist/fonts/geist-sans/Geist-Bold.woff2') format('woff2');
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
+/* Inter font from CDN — cleaner than Geist for data-heavy UI */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 @font-face {
   font-family: 'Geist Mono';

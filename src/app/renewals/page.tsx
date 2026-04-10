@@ -14,7 +14,7 @@ import { format } from "date-fns"
 import { fr } from "date-fns/locale"
 
 function RenewalsContent() {
-  const { data, loading } = useFetch<{ deals: RenewalDeal[]; kpis: RenewalKpis }>("/api/renewals")
+  const { data, loading } = useFetch<{ deals: RenewalDeal[]; kpis: RenewalKpis }>("/api/renewals", { days: "365" })
   const [selectedDayDeals, setSelectedDayDeals] = useState<RenewalDeal[]>([])
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
 
@@ -98,7 +98,7 @@ function RenewalsContent() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 card">
           <h3 className="text-sm font-medium text-text-secondary mb-4">
-            Calendrier des renouvellements (90 jours)
+            Calendrier des renouvellements
           </h3>
           {loading ? (
             <div className="skeleton h-64" />
@@ -119,16 +119,26 @@ function RenewalsContent() {
             </p>
           ) : (
             <div className="space-y-2">
-              {selectedDayDeals.map((deal) => (
-                <div key={deal.id} className="p-3 bg-background rounded-lg border border-card-border">
-                  <div className="text-sm font-medium text-text-primary">{deal.companyName ?? deal.name}</div>
-                  <div className="text-xs text-text-muted mt-1">{deal.name}</div>
-                  <div className="flex justify-between mt-2 text-xs">
-                    <span className="font-mono text-accent">{formatCurrency(deal.mrr)} MRR</span>
-                    <span className="text-text-secondary">{deal.ownerId ? getCsmName(deal.ownerId) : "-"}</span>
+              {selectedDayDeals.map((deal) => {
+                const wonStages = ["closedlost", "143474109", "878353129"]
+                const churnStages = ["1220133077", "124302781"]
+                const statusColor = wonStages.includes(deal.stage) ? "border-positive/40" : churnStages.includes(deal.stage) ? "border-negative/40" : "border-warning/40"
+                const statusLabel = wonStages.includes(deal.stage) ? "Won" : churnStages.includes(deal.stage) ? "Churn" : "En cours"
+                const statusTextColor = wonStages.includes(deal.stage) ? "text-positive" : churnStages.includes(deal.stage) ? "text-negative" : "text-warning"
+                return (
+                  <div key={deal.id} className={cn("p-3 bg-background rounded-lg border", statusColor)}>
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-medium text-text-primary">{deal.companyName ?? deal.name}</div>
+                      <span className={cn("text-[10px] font-medium", statusTextColor)}>{statusLabel}</span>
+                    </div>
+                    <div className="text-xs text-text-muted mt-1">{deal.name}</div>
+                    <div className="flex justify-between mt-2 text-xs">
+                      <span className="font-mono text-accent">{formatCurrency(deal.mrr)} MRR</span>
+                      <span className="text-text-secondary">{deal.ownerId ? getCsmName(deal.ownerId) : "-"}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -138,7 +148,7 @@ function RenewalsContent() {
       <div className="card p-0 overflow-hidden">
         <div className="px-4 py-3 border-b border-card-border">
           <h3 className="text-sm font-medium text-text-secondary">
-            Tous les renouvellements (90 jours)
+            Tous les renouvellements
           </h3>
         </div>
         {loading ? (

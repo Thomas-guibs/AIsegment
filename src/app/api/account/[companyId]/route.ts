@@ -31,7 +31,7 @@ export async function GET(
     // 2. Fetch deals, tickets, meetings in parallel
     const [dealIds, tickets, meetings] = await Promise.all([
       fetchCompanyDeals(companyId),
-      fetchIntercomTickets(company.domain ?? ""),
+      fetchIntercomTickets(company.name),
       fetchMeetingsForCompany(
         company.name,
         company.domain,

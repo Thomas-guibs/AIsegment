@@ -1,8 +1,28 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, createContext, useContext } from "react"
 import { useSearchParams } from "next/navigation"
 import type { PeriodFilter } from "./constants"
+
+// Refresh context — allows the Header button to trigger re-fetch on all hooks
+const RefreshContext = createContext<{ tick: number; refresh: () => void }>({
+  tick: 0,
+  refresh: () => {},
+})
+
+export function RefreshProvider({ children }: { children: React.ReactNode }) {
+  const [tick, setTick] = useState(0)
+  const refresh = useCallback(() => setTick((t) => t + 1), [])
+  return (
+    <RefreshContext.Provider value={{ tick, refresh }}>
+      {children}
+    </RefreshContext.Provider>
+  )
+}
+
+export function useRefresh() {
+  return useContext(RefreshContext)
+}
 
 interface UseFetchResult<T> {
   data: T | null
@@ -19,16 +39,21 @@ export function useFetch<T>(url: string, params?: Record<string, string>): UseFe
   const searchParams = useSearchParams()
   const period = searchParams.get("period") ?? "this_month"
   const csmId = searchParams.get("csmId") ?? ""
+  const { tick } = useRefresh()
+
+  // Stabilize params to avoid infinite re-render loops
+  const paramsString = params ? JSON.stringify(params) : ""
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
+      const extraParams = paramsString ? JSON.parse(paramsString) : {}
       const queryParams = new URLSearchParams({
         period,
         ...(csmId ? { csmId } : {}),
-        ...params,
+        ...extraParams,
       })
 
       const response = await fetch(`${url}?${queryParams.toString()}`)
@@ -43,7 +68,7 @@ export function useFetch<T>(url: string, params?: Record<string, string>): UseFe
     } finally {
       setLoading(false)
     }
-  }, [url, period, csmId, params])
+  }, [url, period, csmId, paramsString, tick])
 
   useEffect(() => {
     fetchData()

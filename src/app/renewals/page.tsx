@@ -1,6 +1,7 @@
 "use client"
 
 import { Suspense, useState } from "react"
+import Link from "next/link"
 import { Header } from "@/components/layout/Header"
 import { KpiCard, KpiCardSkeleton } from "@/components/charts/KpiCard"
 import { HeatmapCalendar } from "@/components/charts/HeatmapCalendar"
@@ -170,7 +171,11 @@ function RenewalsContent() {
                     )}
                   >
                     <td className="px-4 py-3 text-sm font-medium text-text-primary">
-                      {deal.companyName ?? "-"}
+                      {deal.companyId ? (
+                        <Link href={`/account/${deal.companyId}`} className="hover:text-accent transition-colors hover:underline">
+                          {deal.companyName ?? "-"}
+                        </Link>
+                      ) : (deal.companyName ?? "-")}
                     </td>
                     <td className="px-4 py-3 text-sm text-text-secondary">{deal.name}</td>
                     <td className="px-4 py-3 text-sm font-mono text-text-primary">

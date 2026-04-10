@@ -20,6 +20,8 @@ const PIPE_STAGES = [
   { id: SALES_STAGES.EVALUATE_50, label: "Evaluate (50%)", order: 3 },
   { id: SALES_STAGES.OFFRE_ENVOYEE_70, label: "Offre envoyee (70%)", order: 4 },
   { id: SALES_STAGES.GO_VERBAL_80, label: "Go verbal (80%)", order: 5 },
+  { id: SALES_STAGES.CLOSED_WON, label: "Closed Won", order: 6 },
+  { id: SALES_STAGES.PAIEMENT_RECU, label: "Paiement recu", order: 7 },
 ]
 
 // Closed stages (for reference, not in the active pipe)

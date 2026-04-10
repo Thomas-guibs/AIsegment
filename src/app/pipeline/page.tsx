@@ -156,7 +156,7 @@ function PipelineContent() {
       </div>
 
       {/* Kanban columns */}
-      <div className="grid grid-cols-5 gap-3 min-h-[400px]">
+      <div className="grid gap-3 min-h-[400px]" style={{ gridTemplateColumns: `repeat(${displayStages.length}, minmax(0, 1fr))` }}>
         {displayStages.map((stage) => (
           <div key={stage.stageId} className="bg-row-alt rounded-xl border border-card-border p-2.5">
             <div className="flex items-center justify-between mb-3 px-1">

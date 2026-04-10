@@ -265,12 +265,14 @@ export const DEAL_PROPERTIES = [
   "attribution",
   "renewall_date",
   "date_de_prise_en_compte",
+  "expected_closing_date",
   "closedate",
   "dealstage",
   "pipeline",
   "hubspot_owner_id",
   "createdate",
   "hs_lastmodifieddate",
+  "hs_deal_stage_probability",
 ] as const
 
 // Company properties to fetch

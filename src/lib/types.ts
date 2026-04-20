@@ -34,13 +34,23 @@ export interface HubSpotCompany {
   id: string
   properties: {
     name: string | null
+    domain: string | null
     total_revenue: string | null
     plan: string | null
     hubspot_owner_id: string | null
-    proprietaire_de_l_entreprise__csm_: string | null // Company owner (CSM)
+    proprietaire_de_l_entreprise__csm_: string | null
     lifecyclestage: string | null
     phase_du_client: string | null
     num_associated_deals: string | null
+    // Upsell enrichment
+    upsell_parent_company: string | null
+    upsell_parent_siren: string | null
+    upsell_sibling_brands: string | null
+    upsell_stores_count: string | null
+    upsell_languages: string | null
+    upsell_subsites: string | null
+    upsell_enriched_at: string | null
+    upsell_score: string | null
     [key: string]: string | null
   }
 }
@@ -126,6 +136,25 @@ export interface Company {
   accompagnement: string | null
   reasonChurn: string | null
   customerSituation: string | null
+  // Upsell enrichment signals
+  upsellSignals: UpsellSignals | null
+}
+
+export interface UpsellSignals {
+  parentCompany: string | null
+  parentSiren: string | null
+  siblingBrands: Array<{
+    name: string
+    siren: string
+    isClient: boolean
+    hubspotCompanyId?: string
+  }>
+  storesCount: number
+  languages: string[]
+  subsites: Array<{ lang: string; url: string }>
+  enrichedAt: string | null
+  score: number
+  grade: "hot" | "warm" | "cold"
 }
 
 export interface IntercomTicket {

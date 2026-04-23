@@ -47,6 +47,10 @@ export async function findLegalPageAndContent(domain: string): Promise<{ url: st
     "/legal",
     "/mentions",
     "/fr/mentions-legales",
+    "/policies/legal-notice",    // Shopify
+    "/policies/terms-of-service", // Shopify
+    "/pages/mentions-legales",   // Shopify pages
+    "/cgv",
   ]
 
   // Parallel fetch all candidates
@@ -54,8 +58,14 @@ export async function findLegalPageAndContent(domain: string): Promise<{ url: st
     candidates.map(async (path) => {
       const url = `${base}${path}`
       const html = await fetchPage(url, 3000)
-      if (html && (html.toLowerCase().includes("siren") || html.toLowerCase().includes("rcs") || html.toLowerCase().includes("mentions légales"))) {
-        return { url, html }
+      if (html) {
+        const lower = html.toLowerCase()
+        if (lower.includes("siren") || lower.includes("siret") ||
+            lower.includes("rcs") || lower.includes("tva") ||
+            lower.includes("mentions légales") || lower.includes("mentions legales") ||
+            lower.includes("capital social")) {
+          return { url, html }
+        }
       }
       return null
     })
@@ -72,23 +82,44 @@ export async function findLegalPage(domain: string): Promise<string | null> {
 }
 
 // Extract SIREN from HTML using regex
+// Handles: SIREN direct, SIRET (first 9 digits), RCS, TVA intra-communautaire (FR + 2 check digits + 9 SIREN)
 export function extractSiren(html: string): string | null {
-  // SIRET = 14 digits, SIREN = 9 digits
-  // Pattern: "SIREN 123 456 789" or "SIRET 12345678901234" or "RCS Paris 123456789"
+  // Strip HTML tags for cleaner text matching
+  const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")
+
   const sirenPatterns = [
-    /siren\s*[:=]?\s*([\d\s]{9,14})/i,
-    /siret\s*[:=]?\s*([\d\s]{14,17})/i,
-    /rcs[^0-9]*([\d\s]{9,14})/i,
-    /n°\s*([\d\s]{9,17})/i,
+    // Direct SIREN/SIRET
+    /siren\s*[:=]?\s*([\d\s]{9,17})/i,
+    /siret\s*[:=]?\s*([\d\s]{9,17})/i,
+    // RCS + city + number
+    /rcs\s+[a-zéèêëàâ\- ]{2,20}\s*([\d\s]{9,14})/i,
+    // TVA intra-communautaire: FR + 2 digits + 9 digits (SIREN)
+    /(?:tva|n°\s*tva)[^a-z0-9]*(?:intra[^a-z0-9]*(?:communautaire)?)?[^a-z0-9]*fr\s*(\d{2})\s*(\d{3})\s*(\d{3})\s*(\d{3})/i,
+    // Standalone TVA pattern: FR followed by 11 digits
+    /fr\s*(\d{11})/i,
+    // Capital social section often has SIREN nearby
+    /(?:immatricul|enregistr)[^.]{0,60}([\d\s]{9,14})/i,
   ]
 
   for (const pattern of sirenPatterns) {
-    const match = html.match(pattern)
-    if (match) {
-      const digits = match[1].replace(/\s/g, "")
-      if (digits.length >= 9) {
-        return digits.slice(0, 9) // SIREN = first 9 digits
-      }
+    const match = text.match(pattern)
+    if (!match) continue
+
+    // TVA intra format: groups are check(2) + 3×3 digits of SIREN
+    if (match.length === 5) {
+      // Pattern with 4 groups: check + 3 groups of 3
+      return `${match[2]}${match[3]}${match[4]}`
+    }
+
+    // FR + 11 digits: last 9 = SIREN
+    if (match[1] && match[1].length === 11) {
+      return match[1].slice(2) // Remove 2 check digits
+    }
+
+    // Standard patterns
+    const digits = match[1].replace(/\s/g, "")
+    if (digits.length >= 9) {
+      return digits.slice(0, 9)
     }
   }
   return null
@@ -185,6 +216,25 @@ export function extractSubsites(html: string, baseDomain: string): Array<{ lang:
   })
 
   return subsites
+}
+
+// Check if a domain looks like an ecommerce site (ICP for Loyoly)
+export async function isEcommerceSite(domain: string): Promise<boolean> {
+  const html = await fetchPage(`https://${domain}/`, 3000)
+  if (!html) return false
+  const lower = html.toLowerCase()
+  // Platform indicators
+  if (lower.includes("shopify") || lower.includes("woocommerce") ||
+      lower.includes("prestashop") || lower.includes("magento") ||
+      lower.includes("bigcommerce") || lower.includes("shopware")) return true
+  // Cart/checkout indicators
+  if (lower.includes("/cart") || lower.includes("/panier") ||
+      lower.includes("add-to-cart") || lower.includes("ajouter-au-panier") ||
+      lower.includes("/checkout") || lower.includes("/commande")) return true
+  // Product indicators
+  if (lower.includes("/products/") || lower.includes("/produit/") ||
+      lower.includes("/collections/") || lower.includes("/categorie-produit/")) return true
+  return false
 }
 
 // Helper: clean up the domain

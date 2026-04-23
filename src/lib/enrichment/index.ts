@@ -6,6 +6,7 @@ import {
   extractLanguages,
   extractSubsites,
   cleanDomain,
+  isEcommerceSite,
 } from "./website"
 import { enrichWithPappers } from "./pappers"
 import { extractWithClaude } from "./claude"
@@ -21,7 +22,7 @@ function setCachedEnrichment(companyId: string, signals: UpsellSignals): void {
   setCache(`enrich_${companyId}`, signals)
 }
 
-// Orchestrate enrichment for a single company — parallel fetching to stay under Vercel timeout
+// Orchestrate enrichment for a single company
 export async function enrichCompany(
   companyId: string,
   domain: string,
@@ -37,7 +38,7 @@ export async function enrichCompany(
   if (!cleaned) return null
   const base = `https://${cleaned}`
 
-  // PARALLEL FETCH: homepage + legal page + one stores page (most common)
+  // PARALLEL: homepage + legal page + stores page
   const [homeHtml, legalResult, storesPageHtml] = await Promise.all([
     fetchPage(`${base}/`, 4000),
     findLegalPageAndContent(cleaned),
@@ -50,16 +51,12 @@ export async function enrichCompany(
   const languages = homeHtml ? extractLanguages(homeHtml) : []
   const subsites = homeHtml ? extractSubsites(homeHtml, cleaned) : []
 
-  // Extract stores count (try both homepage and stores page)
+  // Stores count
   let storesCount = 0
-  if (storesPageHtml) {
-    storesCount = extractStoresCount(storesPageHtml)
-  }
-  if (storesCount === 0 && homeHtml) {
-    storesCount = extractStoresCount(homeHtml)
-  }
+  if (storesPageHtml) storesCount = extractStoresCount(storesPageHtml)
+  if (storesCount === 0 && homeHtml) storesCount = extractStoresCount(homeHtml)
 
-  // Extract SIREN from legal page (regex first, Claude fallback only if needed)
+  // Extract SIREN from legal page
   let siren: string | null = null
   if (legalResult?.html) {
     siren = extractSiren(legalResult.html)
@@ -69,31 +66,54 @@ export async function enrichCompany(
     }
   }
 
-  // Enrich with Pappers if we have a SIREN
+  // Enrich with Pappers cartography if we have SIREN
   let parentCompany: string | null = null
   let parentSiren: string | null = null
-  let siblingBrands: Array<{ name: string; siren: string; isClient: boolean; hubspotCompanyId?: string }> = []
+  let siblingBrands: Array<{ name: string; siren: string; isClient: boolean; hubspotCompanyId?: string; isEcommerce?: boolean; role?: string }> = []
 
   if (siren) {
     const pappers = await enrichWithPappers(siren)
     parentCompany = pappers.parentCompanyName
     parentSiren = pappers.parentCompanySiren
 
-    const clientsList = Array.from(allCustomerDomains.values())
-    siblingBrands = pappers.subsidiaries.map((sub) => {
-      let hubspotCompanyId: string | undefined
-      let isClient = false
-      const subLower = sub.name.toLowerCase()
-      for (const client of clientsList) {
-        const clientLower = client.name.toLowerCase()
-        if (clientLower.includes(subLower) || subLower.includes(clientLower)) {
-          hubspotCompanyId = client.id
-          isClient = true
-          break
-        }
-      }
-      return { name: sub.name, siren: sub.siren, isClient, hubspotCompanyId }
-    })
+    if (pappers.relatedCompanies.length > 0) {
+      const clientsList = Array.from(allCustomerDomains.values())
+
+      // Check ICP (ecommerce) for top related companies — limit to 5 to avoid timeout
+      const topRelated = pappers.relatedCompanies.slice(0, 8)
+
+      siblingBrands = await Promise.all(
+        topRelated.map(async (related) => {
+          // Check if already a client
+          let hubspotCompanyId: string | undefined
+          let isClient = false
+          const relLower = related.name.toLowerCase()
+          for (const client of clientsList) {
+            const clientLower = client.name.toLowerCase()
+            if (clientLower.includes(relLower) || relLower.includes(clientLower)) {
+              hubspotCompanyId = client.id
+              isClient = true
+              break
+            }
+          }
+
+          // ICP check: if related company has a domain, check if it's ecommerce
+          let ecommerce = related.isEcommerce
+          if (ecommerce === undefined && related.domain) {
+            ecommerce = await isEcommerceSite(related.domain)
+          }
+
+          return {
+            name: related.name,
+            siren: related.siren,
+            isClient,
+            hubspotCompanyId,
+            isEcommerce: ecommerce,
+            role: related.role,
+          }
+        })
+      )
+    }
   }
 
   const signals = buildUpsellSignals({

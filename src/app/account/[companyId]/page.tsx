@@ -420,10 +420,17 @@ function UpsellSignalsCard({ companyId, signals: initialSignals }: { companyId: 
                     {nonClientSiblings.map((sib) => (
                       <span
                         key={sib.siren}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-accent/10 text-accent text-2xs rounded-full border border-accent/20"
-                        title={`SIREN ${sib.siren}`}
+                        className={cn(
+                          "inline-flex items-center gap-1 px-2 py-0.5 text-2xs rounded-full border",
+                          sib.isEcommerce
+                            ? "bg-accent/10 text-accent border-accent/20"
+                            : "bg-gray-100 text-gray-500 border-gray-200"
+                        )}
+                        title={`SIREN ${sib.siren}${sib.role ? ` — ${sib.role}` : ""}${sib.isEcommerce ? " — Ecommerce" : ""}`}
                       >
+                        {sib.isEcommerce && <Store className="w-2.5 h-2.5" />}
                         {sib.name}
+                        {sib.role && <span className="text-text-muted">({sib.role.split(" ")[0]})</span>}
                       </span>
                     ))}
                   </div>
@@ -508,14 +515,20 @@ function UpsellSignalsCard({ companyId, signals: initialSignals }: { companyId: 
         <div className="mt-4 pt-4 border-t border-card-border">
           <div className="text-2xs font-medium text-text-muted uppercase tracking-wider mb-2">Opportunites identifiees</div>
           <ul className="space-y-1 text-xs text-text-primary">
-            {nonClientSiblings.length > 0 && (
-              <li className="flex items-start gap-2">
-                <span className="text-accent mt-0.5">•</span>
-                <span>
-                  <strong>{nonClientSiblings.length} marque{nonClientSiblings.length > 1 ? "s" : ""}</strong> du groupe non-cliente{nonClientSiblings.length > 1 ? "s" : ""} a prospecter en interne
-                </span>
-              </li>
-            )}
+            {nonClientSiblings.length > 0 && (() => {
+              const ecomSiblings = nonClientSiblings.filter((s) => s.isEcommerce)
+              return (
+                <li className="flex items-start gap-2">
+                  <span className="text-accent mt-0.5">•</span>
+                  <span>
+                    <strong>{nonClientSiblings.length} entreprise{nonClientSiblings.length > 1 ? "s" : ""}</strong> liee{nonClientSiblings.length > 1 ? "s" : ""} via les dirigeants
+                    {ecomSiblings.length > 0 && (
+                      <>, dont <strong className="text-accent">{ecomSiblings.length} ecommerce{ecomSiblings.length > 1 ? "s" : ""}</strong> (ICP Loyoly)</>
+                    )}
+                  </span>
+                </li>
+              )
+            })()}
             {signals.storesCount > 10 && (
               <li className="flex items-start gap-2">
                 <span className="text-accent mt-0.5">•</span>

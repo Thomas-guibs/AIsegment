@@ -1,6 +1,6 @@
 // Pappers API integration for French company data
-// Free tier: 100 requests/day with API key
 // Docs: https://api.pappers.fr
+// Uses the /v2/entreprise endpoint + dirigeants to map related companies
 
 const PAPPERS_BASE = "https://api.pappers.fr/v2"
 
@@ -8,128 +8,135 @@ function getApiKey(): string | null {
   return process.env.PAPPERS_API_KEY ?? null
 }
 
-interface PappersCompany {
-  siren: string
-  nom_entreprise: string
-  denomination: string | null
-  sigle: string | null
-  entreprise_cessee: boolean
-  // Group info
-  groupe?: {
-    nom_groupe: string
-    siren_tete_de_groupe: string | null
-    nom_tete_de_groupe: string | null
-  }
-  // Subsidiaries (filiales)
-  liste_etablissements?: Array<{
-    siret: string
-    siege: boolean
-    denomination: string | null
-    adresse_ligne_1: string
-    code_postal: string
-    ville: string
-  }>
-  // Related entities by ownership
-  representants?: Array<{
-    nom: string
-    prenom: string
-    qualite: string
-  }>
-  // Sometimes a "beneficiaires_effectifs" or owner list
-  beneficiaires_effectifs?: Array<{
-    nom_complet: string
-    pourcentage_parts: number
-  }>
-}
-
-export interface PappersResult {
-  raisonSociale: string | null
-  parentCompanyName: string | null
-  parentCompanySiren: string | null
-  subsidiaries: Array<{ name: string; siren: string }>
-}
-
-// Fetch Pappers data for a SIREN
-export async function getCompanyBySiren(siren: string): Promise<PappersResult | null> {
+async function pappersFetch<T>(endpoint: string, params: Record<string, string> = {}): Promise<T | null> {
   const key = getApiKey()
   if (!key) {
     console.warn("PAPPERS_API_KEY not configured")
     return null
   }
 
-  const cleanSiren = siren.replace(/\D/g, "").slice(0, 9)
-  if (cleanSiren.length !== 9) return null
+  const url = new URL(`${PAPPERS_BASE}${endpoint}`)
+  url.searchParams.set("api_token", key)
+  for (const [k, v] of Object.entries(params)) {
+    url.searchParams.set(k, v)
+  }
 
   try {
-    const url = `${PAPPERS_BASE}/entreprise?siren=${cleanSiren}&api_token=${key}`
-    const response = await fetch(url, {
+    const response = await fetch(url.toString(), {
       headers: { Accept: "application/json" },
     })
     if (!response.ok) return null
-
-    const data = (await response.json()) as PappersCompany
-
-    return {
-      raisonSociale: data.denomination ?? data.nom_entreprise ?? null,
-      parentCompanyName: data.groupe?.nom_tete_de_groupe ?? null,
-      parentCompanySiren: data.groupe?.siren_tete_de_groupe ?? null,
-      subsidiaries: [], // Direct subsidiaries require a separate endpoint
-    }
+    return await response.json()
   } catch {
     return null
   }
 }
 
-// Fetch subsidiaries of a parent company
-// Uses the "filiales" endpoint
-export async function getSubsidiariesOfParent(parentSiren: string): Promise<Array<{ name: string; siren: string }>> {
-  const key = getApiKey()
-  if (!key) return []
-
-  try {
-    const url = `${PAPPERS_BASE}/entreprise?siren=${parentSiren}&api_token=${key}`
-    const response = await fetch(url, { headers: { Accept: "application/json" } })
-    if (!response.ok) return []
-
-    const data = await response.json()
-    // Pappers returns "filiales" or linked entities in different shapes depending on endpoint
-    const filiales: Array<{ name: string; siren: string }> = []
-
-    // Check for filiales array
-    const arr = data.filiales ?? data.liste_filiales ?? []
-    for (const f of arr) {
-      if (f.siren && f.denomination) {
-        filiales.push({ name: f.denomination, siren: f.siren })
-      }
-    }
-
-    return filiales
-  } catch {
-    return []
-  }
+export interface RelatedCompany {
+  name: string
+  siren: string
+  role: string // "President", "Gérant", "Associé", etc.
+  domain?: string
+  isEcommerce?: boolean
 }
 
-// Complete enrichment: get parent + siblings
+export interface PappersResult {
+  raisonSociale: string | null
+  parentCompanyName: string | null
+  parentCompanySiren: string | null
+  relatedCompanies: RelatedCompany[]
+}
+
+// Get company info + dirigeants, then find their other companies
 export async function enrichWithPappers(siren: string): Promise<PappersResult> {
   const result: PappersResult = {
     raisonSociale: null,
     parentCompanyName: null,
     parentCompanySiren: null,
-    subsidiaries: [],
+    relatedCompanies: [],
   }
 
-  const company = await getCompanyBySiren(siren)
+  const cleanSiren = siren.replace(/\D/g, "").slice(0, 9)
+  if (cleanSiren.length !== 9) return result
+
+  // Step 1: Get company details + dirigeants
+  const company = await pappersFetch<any>("/entreprise", {
+    siren: cleanSiren,
+  })
   if (!company) return result
 
-  result.raisonSociale = company.raisonSociale
-  result.parentCompanyName = company.parentCompanyName
-  result.parentCompanySiren = company.parentCompanySiren
+  result.raisonSociale = company.denomination ?? company.nom_entreprise ?? null
 
-  // If there's a parent, fetch its subsidiaries (siblings)
-  if (result.parentCompanySiren) {
-    const siblings = await getSubsidiariesOfParent(result.parentCompanySiren)
-    // Exclude self
-    result.subsidiaries = siblings.filter((s) => s.siren !== siren)
+  // Check for group info
+  if (company.groupe) {
+    result.parentCompanyName = company.groupe.nom_tete_de_groupe ?? company.groupe.nom_groupe ?? null
+    result.parentCompanySiren = company.groupe.siren_tete_de_groupe ?? null
+  }
+
+  // Step 2: Get dirigeants and find their other companies
+  const dirigeants = company.representants ?? company.dirigeants ?? []
+  const seenSirens = new Set<string>([cleanSiren])
+
+  for (const dirigeant of dirigeants.slice(0, 3)) { // Limit to top 3 dirigeants
+    const nom = dirigeant.nom ?? dirigeant.nom_complet
+    const prenom = dirigeant.prenom
+    if (!nom) continue
+
+    // Search for other companies led by this person
+    const searchQuery = prenom ? `${prenom} ${nom}` : nom
+    const searchResults = await pappersFetch<any>("/recherche-dirigeants", {
+      q: searchQuery,
+      par_page: "10",
+    })
+
+    if (!searchResults?.resultats) continue
+
+    for (const match of searchResults.resultats) {
+      // Each result has an "entreprises" array
+      const entreprises = match.entreprises ?? []
+      for (const ent of entreprises) {
+        const entSiren = ent.siren
+        if (!entSiren || seenSirens.has(entSiren)) continue
+        if (ent.entreprise_cessee) continue // Skip closed companies
+        seenSirens.add(entSiren)
+
+        result.relatedCompanies.push({
+          name: ent.denomination ?? ent.nom_entreprise ?? "Unknown",
+          siren: entSiren,
+          role: match.qualite ?? dirigeant.qualite ?? "Dirigeant",
+        })
+      }
+    }
+  }
+
+  // Step 3: Also check beneficiaires effectifs for additional links
+  const beneficiaires = company.beneficiaires_effectifs ?? []
+  for (const benef of beneficiaires.slice(0, 3)) {
+    const nom = benef.nom_complet ?? benef.nom
+    if (!nom) continue
+
+    const searchResults = await pappersFetch<any>("/recherche-dirigeants", {
+      q: nom,
+      par_page: "5",
+    })
+
+    if (!searchResults?.resultats) continue
+
+    for (const match of searchResults.resultats) {
+      const entreprises = match.entreprises ?? []
+      for (const ent of entreprises) {
+        const entSiren = ent.siren
+        if (!entSiren || seenSirens.has(entSiren)) continue
+        if (ent.entreprise_cessee) continue
+        seenSirens.add(entSiren)
+
+        result.relatedCompanies.push({
+          name: ent.denomination ?? ent.nom_entreprise ?? "Unknown",
+          siren: entSiren,
+          role: `Bénéficiaire (${benef.pourcentage_parts ?? "?"}%)`,
+        })
+      }
+    }
   }
 
   return result

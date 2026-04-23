@@ -139,6 +139,8 @@ export interface UpsellSignals {
     siren: string
     isClient: boolean
     hubspotCompanyId?: string
+    isEcommerce?: boolean
+    role?: string
   }>
   storesCount: number
   languages: string[]

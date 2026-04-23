@@ -25,9 +25,14 @@ async function pappersFetch<T>(endpoint: string, params: Record<string, string> 
     const response = await fetch(url.toString(), {
       headers: { Accept: "application/json" },
     })
-    if (!response.ok) return null
+    if (!response.ok) {
+      const body = await response.text().catch(() => "")
+      console.warn(`[pappers] ${endpoint} → ${response.status} ${response.statusText} body=${body.slice(0, 200)}`)
+      return null
+    }
     return await response.json()
-  } catch {
+  } catch (err) {
+    console.warn(`[pappers] ${endpoint} → fetch error: ${String(err).slice(0, 200)}`)
     return null
   }
 }

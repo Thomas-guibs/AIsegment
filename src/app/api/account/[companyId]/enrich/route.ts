@@ -3,7 +3,7 @@ export const maxDuration = 60
 
 import { NextRequest, NextResponse } from "next/server"
 import { fetchCompanyById, fetchCustomerCompanies } from "@/lib/hubspot/companies"
-import { enrichCompany } from "@/lib/enrichment"
+import { enrichCompanyWithDebug } from "@/lib/enrichment"
 
 export async function POST(
   _request: NextRequest,
@@ -20,32 +20,25 @@ export async function POST(
       return NextResponse.json({ error: "Company has no domain" }, { status: 400 })
     }
 
-    // Fetch customer companies in parallel with enrichment start
-    // Customer list is needed for sibling cross-reference only — cached so fast
-    const customersPromise = fetchCustomerCompanies().catch(() => [])
-
-    // Build domain map from customers (awaited when needed)
-    const buildDomainMap = async () => {
-      const customers = await customersPromise
-      const map = new Map<string, { id: string; name: string }>()
-      for (const c of customers) {
-        if (c.domain) map.set(c.domain.toLowerCase(), { id: c.id, name: c.name })
-      }
-      return map
+    const customers = await fetchCustomerCompanies().catch(() => [])
+    const domainMap = new Map<string, { id: string; name: string }>()
+    for (const c of customers) {
+      if (c.domain) domainMap.set(c.domain.toLowerCase(), { id: c.id, name: c.name })
     }
 
-    const domainMap = await buildDomainMap()
-
-    const signals = await enrichCompany(
+    const { signals, debug } = await enrichCompanyWithDebug(
       companyId, company.domain, company.name,
       company.mrr, company.plan, domainMap
     )
 
     if (!signals) {
-      return NextResponse.json({ error: "Could not extract signals from website" }, { status: 500 })
+      return NextResponse.json({
+        error: "Could not extract signals from website",
+        debug,
+      }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, signals })
+    return NextResponse.json({ success: true, signals, debug })
   } catch (error) {
     console.error("Enrich API error:", error)
     return NextResponse.json({ error: "Enrichment failed", details: String(error).slice(0, 500) }, { status: 500 })

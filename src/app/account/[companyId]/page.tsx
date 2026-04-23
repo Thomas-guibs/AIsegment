@@ -303,6 +303,7 @@ function UpsellSignalsCard({ companyId, signals: initialSignals }: { companyId: 
   const [signals, setSignals] = useState<UpsellSignals | null>(initialSignals)
   const [enriching, setEnriching] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [debug, setDebug] = useState<Record<string, unknown> | null>(null)
 
   const handleEnrich = async () => {
     setEnriching(true)
@@ -310,6 +311,7 @@ function UpsellSignalsCard({ companyId, signals: initialSignals }: { companyId: 
     try {
       const response = await fetch(`/api/account/${companyId}/enrich`, { method: "POST" })
       const data = await response.json()
+      if (data.debug) setDebug(data.debug)
       if (data.success && data.signals) {
         setSignals(data.signals)
       } else {
@@ -550,6 +552,15 @@ function UpsellSignalsCard({ companyId, signals: initialSignals }: { companyId: 
       )}
 
       {error && <p className="text-xs text-negative mt-3">{error}</p>}
+
+      {debug && (
+        <details className="mt-3 text-2xs">
+          <summary className="cursor-pointer text-text-muted hover:text-text-primary">Debug trace</summary>
+          <pre className="mt-2 p-2 bg-background rounded border border-card-border overflow-x-auto text-2xs font-mono">
+            {JSON.stringify(debug, null, 2)}
+          </pre>
+        </details>
+      )}
     </div>
   )
 }

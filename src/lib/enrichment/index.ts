@@ -10,11 +10,22 @@ import {
 } from "./website"
 import { enrichWithPappers } from "./pappers"
 import { extractWithClaude } from "./claude"
-import type { UpsellSignals, Company } from "../types"
+import type { UpsellSignals } from "../types"
 import { buildUpsellSignals } from "../scoring/upsell"
-import { hubspotFetch } from "../hubspot/client"
+import { getCached, setCache } from "../cache"
 
-// Orchestrate enrichment for a single company
+// Cache enrichment results (longer TTL — 24h)
+const ENRICHMENT_TTL_MS = 24 * 60 * 60 * 1000
+
+export function getCachedEnrichment(companyId: string): UpsellSignals | null {
+  return getCached<UpsellSignals>(`enrich_${companyId}`)
+}
+
+function setCachedEnrichment(companyId: string, signals: UpsellSignals): void {
+  setCache(`enrich_${companyId}`, signals)
+}
+
+// Orchestrate enrichment for a single company — NO HubSpot writes
 export async function enrichCompany(
   companyId: string,
   domain: string,
@@ -23,6 +34,10 @@ export async function enrichCompany(
   plan: string | null,
   allCustomerDomains: Map<string, { id: string; name: string }>
 ): Promise<UpsellSignals | null> {
+  // Check cache first
+  const cached = getCachedEnrichment(companyId)
+  if (cached) return cached
+
   const cleaned = cleanDomain(domain)
   if (!cleaned) return null
 
@@ -102,7 +117,7 @@ export async function enrichCompany(
     })
   }
 
-  return buildUpsellSignals({
+  const signals = buildUpsellSignals({
     parentCompany,
     parentSiren,
     siblingBrands,
@@ -112,52 +127,7 @@ export async function enrichCompany(
     mrr,
     plan,
   })
-}
 
-// Serialize UpsellSignals into HubSpot property values
-export function serializeForHubSpot(signals: UpsellSignals): Record<string, string> {
-  return {
-    upsell_parent_company: signals.parentCompany ?? "",
-    upsell_parent_siren: signals.parentSiren ?? "",
-    upsell_sibling_brands: JSON.stringify(signals.siblingBrands),
-    upsell_stores_count: String(signals.storesCount),
-    upsell_languages: JSON.stringify(signals.languages),
-    upsell_subsites: JSON.stringify(signals.subsites),
-    upsell_enriched_at: signals.enrichedAt ? signals.enrichedAt.slice(0, 10) : "",
-    upsell_score: String(signals.score),
-  }
-}
-
-// Write enrichment results to HubSpot
-export async function writeEnrichmentToHubSpot(companyId: string, signals: UpsellSignals): Promise<void> {
-  const properties = serializeForHubSpot(signals)
-  await hubspotFetch(`/crm/v3/objects/companies/${companyId}`, {
-    method: "PATCH",
-    body: { properties },
-  } as any)
-}
-
-// Parse HubSpot stored values back to UpsellSignals
-export function parseUpsellSignalsFromHubSpot(props: Record<string, string | null>): UpsellSignals | null {
-  if (!props.upsell_enriched_at) return null
-
-  const safeParse = <T>(json: string | null | undefined, fallback: T): T => {
-    if (!json) return fallback
-    try { return JSON.parse(json) as T } catch { return fallback }
-  }
-
-  const score = parseInt(props.upsell_score ?? "0", 10)
-  const grade: UpsellSignals["grade"] = score > 70 ? "hot" : score >= 40 ? "warm" : "cold"
-
-  return {
-    parentCompany: props.upsell_parent_company || null,
-    parentSiren: props.upsell_parent_siren || null,
-    siblingBrands: safeParse(props.upsell_sibling_brands, []),
-    storesCount: parseInt(props.upsell_stores_count ?? "0", 10) || 0,
-    languages: safeParse(props.upsell_languages, []),
-    subsites: safeParse(props.upsell_subsites, []),
-    enrichedAt: props.upsell_enriched_at,
-    score,
-    grade,
-  }
+  setCachedEnrichment(companyId, signals)
+  return signals
 }

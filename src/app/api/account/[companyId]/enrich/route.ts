@@ -3,9 +3,8 @@ export const maxDuration = 60
 
 import { NextRequest, NextResponse } from "next/server"
 import { fetchCompanyById, fetchCustomerCompanies } from "@/lib/hubspot/companies"
-import { enrichCompany, writeEnrichmentToHubSpot } from "@/lib/enrichment"
+import { enrichCompany } from "@/lib/enrichment"
 
-// POST /api/account/[companyId]/enrich — force refresh enrichment for a single company
 export async function POST(
   _request: NextRequest,
   { params }: { params: { companyId: string } }
@@ -21,7 +20,6 @@ export async function POST(
       return NextResponse.json({ error: "Company has no domain" }, { status: 400 })
     }
 
-    // Build domain map from all customers for sibling cross-ref
     const allCustomers = await fetchCustomerCompanies()
     const domainMap = new Map<string, { id: string; name: string }>()
     for (const c of allCustomers) {
@@ -29,19 +27,13 @@ export async function POST(
     }
 
     const signals = await enrichCompany(
-      companyId,
-      company.domain,
-      company.name,
-      company.mrr,
-      company.plan,
-      domainMap
+      companyId, company.domain, company.name,
+      company.mrr, company.plan, domainMap
     )
 
     if (!signals) {
-      return NextResponse.json({ error: "Enrichment failed — could not extract signals" }, { status: 500 })
+      return NextResponse.json({ error: "Could not extract signals from website" }, { status: 500 })
     }
-
-    await writeEnrichmentToHubSpot(companyId, signals)
 
     return NextResponse.json({ success: true, signals })
   } catch (error) {

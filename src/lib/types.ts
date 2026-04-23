@@ -42,15 +42,6 @@ export interface HubSpotCompany {
     lifecyclestage: string | null
     phase_du_client: string | null
     num_associated_deals: string | null
-    // Upsell enrichment
-    upsell_parent_company: string | null
-    upsell_parent_siren: string | null
-    upsell_sibling_brands: string | null
-    upsell_stores_count: string | null
-    upsell_languages: string | null
-    upsell_subsites: string | null
-    upsell_enriched_at: string | null
-    upsell_score: string | null
     [key: string]: string | null
   }
 }

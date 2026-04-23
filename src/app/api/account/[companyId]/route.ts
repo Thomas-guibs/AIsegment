@@ -6,6 +6,7 @@ import { hubspotFetch } from "@/lib/hubspot/client"
 import { fetchIntercomTickets, countOpenTickets } from "@/lib/intercom/client"
 import { fetchMeetingsForCompany } from "@/lib/google/calendar"
 import { calculateHealthScore } from "@/lib/scoring/health"
+import { getCachedEnrichment } from "@/lib/enrichment"
 import type { Deal, AccountDetail } from "@/lib/types"
 import { DEAL_PROPERTIES, CSM_TEAM } from "@/lib/constants"
 import { parseNumber, parseDate } from "@/lib/utils"
@@ -95,6 +96,10 @@ export async function GET(
       : null
 
     const healthScore = calculateHealthScore(company, openTicketCount, daysSinceLastActivity)
+
+    // Inject cached upsell signals if available
+    const upsellSignals = getCachedEnrichment(companyId)
+    if (upsellSignals) company.upsellSignals = upsellSignals
 
     const accountDetail: AccountDetail = {
       company,

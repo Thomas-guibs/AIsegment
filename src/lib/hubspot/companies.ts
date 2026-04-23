@@ -2,7 +2,6 @@ import { hubspotSearch, hubspotFetch } from "./client"
 import type { HubSpotCompany, Company } from "../types"
 import { COMPANY_PROPERTIES, ACTIVE_CUSTOMER_STAGES } from "../constants"
 import { parseNumber } from "../utils"
-import { parseUpsellSignalsFromHubSpot } from "../enrichment"
 
 function transformCompany(raw: HubSpotCompany): Company {
   const csmOwner = raw.properties.proprietaire_de_l_entreprise__csm_
@@ -35,8 +34,7 @@ function transformCompany(raw: HubSpotCompany): Company {
     accompagnement: raw.properties.cs_accompagnement ?? null,
     reasonChurn: raw.properties.reason_churn ?? null,
     customerSituation: raw.properties.customers_situation ?? null,
-    // Upsell enrichment signals
-    upsellSignals: parseUpsellSignalsFromHubSpot(raw.properties),
+    upsellSignals: null, // populated via enrichment API, not from HubSpot
   }
 }
 

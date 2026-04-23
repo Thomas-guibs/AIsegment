@@ -307,15 +307,6 @@ export const COMPANY_PROPERTIES = [
   "cs_accompagnement",
   "reason_churn",
   "customers_situation",
-  // Upsell enrichment signals
-  "upsell_parent_company",
-  "upsell_parent_siren",
-  "upsell_sibling_brands",
-  "upsell_stores_count",
-  "upsell_languages",
-  "upsell_subsites",
-  "upsell_enriched_at",
-  "upsell_score",
 ] as const
 
 // Customer stage (phase_du_client) — active values for CSM dashboard

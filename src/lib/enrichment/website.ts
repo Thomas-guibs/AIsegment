@@ -1,13 +1,13 @@
 import * as cheerio from "cheerio"
 
-const FETCH_TIMEOUT_MS = 10_000
+const FETCH_TIMEOUT_MS = 4_000
 const USER_AGENT = "Mozilla/5.0 (compatible; LoyolyCSMBot/1.0; +https://loyoly.io)"
 
 // Fetch a web page with timeout and user-agent
-export async function fetchPage(url: string): Promise<string | null> {
+export async function fetchPage(url: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<string | null> {
   try {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
     const response = await fetch(url, {
       method: "GET",
@@ -23,8 +23,9 @@ export async function fetchPage(url: string): Promise<string | null> {
     clearTimeout(timeout)
 
     if (!response.ok) return null
+    // Only read first 200KB to keep things fast
     const text = await response.text()
-    return text
+    return text.slice(0, 200_000)
   } catch {
     return null
   }
@@ -38,47 +39,36 @@ function normalizeDomain(domain: string): string {
 }
 
 // Try to find the legal mentions page of a site
-export async function findLegalPage(domain: string): Promise<string | null> {
+// Fetches top candidates in parallel to minimize latency
+export async function findLegalPageAndContent(domain: string): Promise<{ url: string; html: string } | null> {
   const base = normalizeDomain(domain)
   const candidates = [
     "/mentions-legales",
-    "/mentions",
     "/legal",
-    "/legal-notice",
+    "/mentions",
     "/fr/mentions-legales",
-    "/cgv",
-    "/cgu",
-    "/conditions-generales",
-    "/a-propos",
-    "/about",
-    "/contact",
   ]
 
-  for (const path of candidates) {
-    const url = `${base}${path}`
-    const html = await fetchPage(url)
-    if (html && (html.toLowerCase().includes("siren") || html.toLowerCase().includes("rcs") || html.toLowerCase().includes("mentions légales"))) {
-      return url
-    }
-  }
+  // Parallel fetch all candidates
+  const results = await Promise.all(
+    candidates.map(async (path) => {
+      const url = `${base}${path}`
+      const html = await fetchPage(url, 3000)
+      if (html && (html.toLowerCase().includes("siren") || html.toLowerCase().includes("rcs") || html.toLowerCase().includes("mentions légales"))) {
+        return { url, html }
+      }
+      return null
+    })
+  )
 
-  // Fallback: homepage might contain links to legal page
-  const home = await fetchPage(base)
-  if (!home) return null
+  const hit = results.find((r) => r !== null)
+  return hit ?? null
+}
 
-  const $ = cheerio.load(home)
-  let legalUrl: string | null = null
-  $("a").each((_, el) => {
-    const href = $(el).attr("href")
-    const text = $(el).text().toLowerCase()
-    if (href && (text.includes("mentions légales") || text.includes("mentions legales") || text.includes("legal"))) {
-      try {
-        legalUrl = new URL(href, base).toString()
-        return false // break
-      } catch {}
-    }
-  })
-  return legalUrl
+// Legacy compat wrapper
+export async function findLegalPage(domain: string): Promise<string | null> {
+  const result = await findLegalPageAndContent(domain)
+  return result?.url ?? null
 }
 
 // Extract SIREN from HTML using regex

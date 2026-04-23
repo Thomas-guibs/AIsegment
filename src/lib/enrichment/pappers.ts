@@ -63,23 +63,34 @@ export async function enrichWithPappers(siren: string): Promise<PappersResult> {
   const company = await pappersFetch<any>("/entreprise", {
     siren: cleanSiren,
   })
-  if (!company) return result
+  if (!company) {
+    console.log(`[pappers:${cleanSiren}] no company data returned`)
+    return result
+  }
 
   result.raisonSociale = company.denomination ?? company.nom_entreprise ?? null
+
+  // Log available fields for debugging
+  const availableFields = Object.keys(company).filter(k => company[k] !== null && company[k] !== undefined)
+  console.log(`[pappers:${cleanSiren}] company=${result.raisonSociale} fields=[${availableFields.join(",")}]`)
 
   // Check for group info
   if (company.groupe) {
     result.parentCompanyName = company.groupe.nom_tete_de_groupe ?? company.groupe.nom_groupe ?? null
     result.parentCompanySiren = company.groupe.siren_tete_de_groupe ?? null
+    console.log(`[pappers:${cleanSiren}] groupe=${result.parentCompanyName} siren=${result.parentCompanySiren}`)
   }
 
   // Step 2: Get dirigeants and find their other companies
   const dirigeants = company.representants ?? company.dirigeants ?? []
+  console.log(`[pappers:${cleanSiren}] dirigeants=${dirigeants.length} (field: ${company.representants ? "representants" : company.dirigeants ? "dirigeants" : "none"})`)
+
   const seenSirens = new Set<string>([cleanSiren])
 
-  for (const dirigeant of dirigeants.slice(0, 3)) { // Limit to top 3 dirigeants
+  for (const dirigeant of dirigeants.slice(0, 3)) {
     const nom = dirigeant.nom ?? dirigeant.nom_complet
     const prenom = dirigeant.prenom
+    console.log(`[pappers:${cleanSiren}] dirigeant: ${prenom ?? ""} ${nom ?? "?"} qualite=${dirigeant.qualite ?? "?"}`)
     if (!nom) continue
 
     // Search for other companies led by this person
@@ -89,19 +100,23 @@ export async function enrichWithPappers(siren: string): Promise<PappersResult> {
       par_page: "10",
     })
 
+    console.log(`[pappers:${cleanSiren}] search "${searchQuery}" → ${searchResults ? Object.keys(searchResults).join(",") : "NULL"} resultats=${searchResults?.resultats?.length ?? 0}`)
+
     if (!searchResults?.resultats) continue
 
     for (const match of searchResults.resultats) {
-      // Each result has an "entreprises" array
       const entreprises = match.entreprises ?? []
       for (const ent of entreprises) {
         const entSiren = ent.siren
         if (!entSiren || seenSirens.has(entSiren)) continue
-        if (ent.entreprise_cessee) continue // Skip closed companies
+        if (ent.entreprise_cessee) continue
         seenSirens.add(entSiren)
 
+        const name = ent.denomination ?? ent.nom_entreprise ?? "Unknown"
+        console.log(`[pappers:${cleanSiren}] related: ${name} (${entSiren})`)
+
         result.relatedCompanies.push({
-          name: ent.denomination ?? ent.nom_entreprise ?? "Unknown",
+          name,
           siren: entSiren,
           role: match.qualite ?? dirigeant.qualite ?? "Dirigeant",
         })

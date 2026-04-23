@@ -172,8 +172,12 @@ export async function enrichCompanyWithDebug(
 
   setCachedEnrichment(companyId, signals)
 
-  // Log the debug trace for investigation
-  console.log(`[enrichment:${companyId}]`, JSON.stringify(debug))
+  // Log each debug field separately (Vercel truncates long log messages)
+  console.log(`[enrich:${companyId}] domain=${debug.domain}`)
+  console.log(`[enrich:${companyId}] homepage=${debug.homepageFetched} legal=${debug.legalPageFetched} legalUrl=${debug.legalPageUrl}`)
+  console.log(`[enrich:${companyId}] siren=${debug.sirenFound} method=${debug.sirenMethod}`)
+  console.log(`[enrich:${companyId}] pappersCalled=${debug.pappersCalled} relatedCount=${debug.pappersRelatedCount} pappersError=${debug.pappersError}`)
+  console.log(`[enrich:${companyId}] finalSignals parent=${signals.parentCompany} siblings=${signals.siblingBrands.length} stores=${signals.storesCount} languages=${signals.languages.length}`)
 
   return { signals, debug }
 }

@@ -23,9 +23,16 @@ export async function fetchPage(url: string, timeoutMs = FETCH_TIMEOUT_MS): Prom
     clearTimeout(timeout)
 
     if (!response.ok) return null
-    // Only read first 200KB to keep things fast
     const text = await response.text()
-    return text.slice(0, 200_000)
+    // Strip scripts, styles and inline SVG to drastically reduce size
+    // (Shopify pages can be 600KB+ with legal info in footer)
+    const cleaned = text
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<svg[\s\S]*?<\/svg>/gi, "")
+      .replace(/<!--[\s\S]*?-->/g, "")
+    // Keep up to 1MB of cleaned HTML (usually 10-20× smaller than raw)
+    return cleaned.slice(0, 1_000_000)
   } catch {
     return null
   }

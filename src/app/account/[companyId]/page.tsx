@@ -413,70 +413,73 @@ function UpsellSignalsCard({ companyId, signals: initialSignals }: { companyId: 
                   <ExternalLink className="w-2.5 h-2.5" />
                 </a>
               )}
-              {nonClientSiblings.length > 0 && (
-                <div className="mt-3">
-                  <div className="text-2xs text-text-muted mb-2">
-                    {nonClientSiblings.length} entreprise{nonClientSiblings.length > 1 ? "s" : ""} liee{nonClientSiblings.length > 1 ? "s" : ""} via les dirigeants
-                  </div>
-                  <div className="space-y-1.5">
-                    {nonClientSiblings.map((sib) => {
-                      const score = sib.icpScore ?? 0
-                      const scoreColor = score >= 50 ? "text-positive bg-positive/10 border-positive/20" :
-                        score >= 20 ? "text-warning bg-warning/10 border-warning/20" :
-                        "text-text-muted bg-gray-100 border-gray-200"
-                      return (
-                        <div key={sib.siren} className="flex items-center gap-2 text-2xs">
-                          <span className={cn("inline-flex items-center justify-center w-8 h-5 rounded border font-mono font-semibold", scoreColor)}>
-                            {score}
-                          </span>
-                          <span className={cn("font-medium", score >= 50 ? "text-text-primary" : "text-text-secondary")}>
-                            {sib.name}
-                          </span>
-                          {sib.isEcommerce && (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0 rounded-full bg-positive/10 text-positive border border-positive/20">
-                              <Store className="w-2.5 h-2.5" />Ecommerce
-                            </span>
-                          )}
-                          {sib.icpSignals && sib.icpSignals.length > 0 && (
-                            <span className="text-text-muted truncate" title={sib.icpSignals.join(" | ")}>
-                              {sib.icpSignals.filter((s) => !s.startsWith("Site:")).join(" · ")}
-                            </span>
-                          )}
-                          <a
-                            href={`https://www.pappers.fr/entreprise/${sib.siren}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="ml-auto text-text-muted hover:text-accent flex-shrink-0"
-                          >
-                            <ExternalLink className="w-2.5 h-2.5" />
-                          </a>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-              {clientSiblings.length > 0 && (
-                <div className="mt-2">
-                  <div className="text-2xs text-text-muted mb-1">
-                    Deja clientes
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {clientSiblings.map((sib) => (
-                      <Link
-                        key={sib.siren}
-                        href={sib.hubspotCompanyId ? `/account/${sib.hubspotCompanyId}` : "#"}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-positive/10 text-positive text-2xs rounded-full border border-positive/20 hover:bg-positive/20 transition-colors"
-                      >
-                        {sib.name}
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              )}
             </>
           ) : (
             <div className="text-xs text-text-muted">Aucun groupe detecte (entreprise independante)</div>
+          )}
+
+          {/* Related companies via dirigeants — shown regardless of parent group */}
+          {nonClientSiblings.length > 0 && (
+            <div className="mt-3">
+              <div className="text-2xs text-text-muted mb-2">
+                {nonClientSiblings.length} entreprise{nonClientSiblings.length > 1 ? "s" : ""} liee{nonClientSiblings.length > 1 ? "s" : ""} via les dirigeants
+              </div>
+              <div className="space-y-1.5">
+                {nonClientSiblings.map((sib) => {
+                  const score = sib.icpScore ?? 0
+                  const scoreColor = score >= 50 ? "text-positive bg-positive/10 border-positive/20" :
+                    score >= 20 ? "text-warning bg-warning/10 border-warning/20" :
+                    "text-text-muted bg-gray-100 border-gray-200"
+                  return (
+                    <div key={sib.siren} className="flex items-center gap-2 text-2xs">
+                      <span className={cn("inline-flex items-center justify-center w-8 h-5 rounded border font-mono font-semibold flex-shrink-0", scoreColor)}>
+                        {score}
+                      </span>
+                      <span className={cn("font-medium truncate max-w-[200px]", score >= 50 ? "text-text-primary" : "text-text-secondary")}>
+                        {sib.name}
+                      </span>
+                      {sib.isEcommerce && (
+                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0 rounded-full bg-positive/10 text-positive border border-positive/20 flex-shrink-0">
+                          <Store className="w-2.5 h-2.5" />Ecommerce
+                        </span>
+                      )}
+                      {sib.icpSignals && sib.icpSignals.length > 0 && (
+                        <span className="text-text-muted truncate" title={sib.icpSignals.join(" | ")}>
+                          {sib.icpSignals.filter((s) => !s.startsWith("Site:")).slice(0, 1).join(" · ")}
+                        </span>
+                      )}
+                      <a
+                        href={`https://www.pappers.fr/entreprise/${sib.siren}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-auto text-text-muted hover:text-accent flex-shrink-0"
+                      >
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {clientSiblings.length > 0 && (
+            <div className="mt-2">
+              <div className="text-2xs text-text-muted mb-1">
+                Deja clientes
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {clientSiblings.map((sib) => (
+                  <Link
+                    key={sib.siren}
+                    href={sib.hubspotCompanyId ? `/account/${sib.hubspotCompanyId}` : "#"}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-positive/10 text-positive text-2xs rounded-full border border-positive/20 hover:bg-positive/20 transition-colors"
+                  >
+                    {sib.name}
+                  </Link>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 

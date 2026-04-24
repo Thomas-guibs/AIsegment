@@ -40,9 +40,61 @@ async function pappersFetch<T>(endpoint: string, params: Record<string, string> 
 export interface RelatedCompany {
   name: string
   siren: string
-  role: string // "President", "Gérant", "Associé", etc.
+  role: string
   domain?: string
   isEcommerce?: boolean
+  codeNaf?: string
+  formeJuridique?: string
+  excluded?: boolean
+  excludeReason?: string
+}
+
+// Company types to exclude (not ICP for ecommerce)
+const EXCLUDED_PATTERNS = [
+  /\bsci\b/i, /\bscpi\b/i, /\bholding\b/i, /\bimmobili[eè]re?\b/i,
+  /\bfoncier[es]?\b/i, /\bgestion\b/i, /\bpatrimoine\b/i,
+  /\bassociation\b/i, /\bfondation\b/i, /\bsyndicat\b/i,
+  /\bcabinet\b/i, /\bnotaire\b/i, /\bavocat\b/i, /\bexpert.?comptable\b/i,
+  /\bfiduciaire\b/i, /\baudit\b/i,
+]
+
+// NAF codes that are clearly NOT ecommerce
+const EXCLUDED_NAF_PREFIXES = [
+  "68", // Immobilier
+  "64", // Services financiers (hors assurance)
+  "65", // Assurance
+  "66", // Activités auxiliaires financières
+  "84", // Administration publique
+  "94", // Activités des organisations associatives
+]
+
+function isExcludedCompany(name: string, codeNaf?: string, formeJuridique?: string): { excluded: boolean; reason?: string } {
+  // Check name patterns
+  for (const pattern of EXCLUDED_PATTERNS) {
+    if (pattern.test(name)) {
+      return { excluded: true, reason: `Nom contient "${name.match(pattern)?.[0]}"` }
+    }
+  }
+  // Check NAF code
+  if (codeNaf) {
+    const prefix = codeNaf.slice(0, 2)
+    if (EXCLUDED_NAF_PREFIXES.includes(prefix)) {
+      return { excluded: true, reason: `NAF ${codeNaf} (${prefix}xx)` }
+    }
+  }
+  // Check forme juridique
+  if (formeJuridique) {
+    const lower = formeJuridique.toLowerCase()
+    if (lower.includes("sci") || lower.includes("holding") || lower.includes("association")) {
+      return { excluded: true, reason: `Forme: ${formeJuridique}` }
+    }
+  }
+  return { excluded: false }
+}
+
+// Exported fetch for use in orchestrator
+export async function fetchPappersCompany(siren: string): Promise<any> {
+  return pappersFetch<any>("/entreprise", { siren })
 }
 
 export interface PappersResult {
@@ -118,12 +170,20 @@ export async function enrichWithPappers(siren: string): Promise<PappersResult> {
         seenSirens.add(entSiren)
 
         const name = ent.denomination ?? ent.nom_entreprise ?? "Unknown"
-        console.log(`[pappers:${cleanSiren}] related: ${name} (${entSiren})`)
+        const codeNaf = ent.code_naf ?? undefined
+        const formeJuridique = ent.forme_juridique ?? undefined
+        const domainFromPappers = ent.domaine_activite ?? undefined
+
+        const { excluded, reason } = isExcludedCompany(name, codeNaf, formeJuridique)
 
         result.relatedCompanies.push({
           name,
           siren: entSiren,
           role: match.qualite ?? dirigeant.qualite ?? "Dirigeant",
+          codeNaf,
+          formeJuridique,
+          excluded,
+          excludeReason: reason,
         })
       }
     }
@@ -150,13 +210,28 @@ export async function enrichWithPappers(siren: string): Promise<PappersResult> {
         if (ent.entreprise_cessee) continue
         seenSirens.add(entSiren)
 
+        const name = ent.denomination ?? ent.nom_entreprise ?? "Unknown"
+        const { excluded, reason } = isExcludedCompany(name, ent.code_naf, ent.forme_juridique)
+
         result.relatedCompanies.push({
-          name: ent.denomination ?? ent.nom_entreprise ?? "Unknown",
+          name,
           siren: entSiren,
           role: `Bénéficiaire (${benef.pourcentage_parts ?? "?"}%)`,
+          codeNaf: ent.code_naf,
+          formeJuridique: ent.forme_juridique,
+          excluded,
+          excludeReason: reason,
         })
       }
     }
+  }
+
+  // Log summary
+  const relevant = result.relatedCompanies.filter((c) => !c.excluded)
+  const excluded = result.relatedCompanies.filter((c) => c.excluded)
+  console.log(`[pappers:${cleanSiren}] total=${result.relatedCompanies.length} relevant=${relevant.length} excluded=${excluded.length}`)
+  for (const c of excluded.slice(0, 5)) {
+    console.log(`[pappers:${cleanSiren}] excluded: ${c.name} (${c.excludeReason})`)
   }
 
   return result

@@ -8,7 +8,7 @@ import {
   cleanDomain,
   isEcommerceSite,
 } from "./website"
-import { enrichWithPappers } from "./pappers"
+import { enrichWithPappers, fetchPappersCompany } from "./pappers"
 import { extractWithClaude } from "./claude"
 import type { UpsellSignals } from "../types"
 import { buildUpsellSignals } from "../scoring/upsell"
@@ -110,7 +110,7 @@ export async function enrichCompanyWithDebug(
   // Enrich with Pappers
   let parentCompany: string | null = null
   let parentSiren: string | null = null
-  let siblingBrands: Array<{ name: string; siren: string; isClient: boolean; hubspotCompanyId?: string; isEcommerce?: boolean; role?: string }> = []
+  let siblingBrands: UpsellSignals["siblingBrands"] = []
 
   if (siren) {
     debug.pappersCalled = true
@@ -122,10 +122,17 @@ export async function enrichCompanyWithDebug(
 
       if (pappers.relatedCompanies.length > 0) {
         const clientsList = Array.from(allCustomerDomains.values())
-        const topRelated = pappers.relatedCompanies.slice(0, 8)
+
+        // Filter out excluded companies (SCI, holdings, etc.), keep relevant ones
+        const relevant = pappers.relatedCompanies.filter((c) => !c.excluded)
+
+        // For each relevant company: check ICP fit via website scraping
+        // Limit to top 10 to avoid timeout
+        const topRelevant = relevant.slice(0, 10)
 
         siblingBrands = await Promise.all(
-          topRelated.map(async (related) => {
+          topRelevant.map(async (related) => {
+            // Check if already a Loyoly client
             let hubspotCompanyId: string | undefined
             let isClient = false
             const relLower = related.name.toLowerCase()
@@ -138,10 +145,49 @@ export async function enrichCompanyWithDebug(
               }
             }
 
-            let ecommerce = related.isEcommerce
-            if (ecommerce === undefined && related.domain) {
-              ecommerce = await isEcommerceSite(related.domain)
+            // Try to find company website via Pappers company detail
+            let companyDomain: string | null = null
+            let ecommerce = false
+            const icpSignals: string[] = []
+
+            // Fetch company detail to get website/domain
+            const companyDetail = await fetchPappersCompany(related.siren)
+            if (companyDetail) {
+              // Check domain_activite / site_web fields
+              const siteWeb = companyDetail.site_web ?? companyDetail.domaine_activite ?? null
+              if (siteWeb) {
+                companyDomain = siteWeb.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0]
+              }
+
+              // Check NAF code for retail/commerce
+              const naf = companyDetail.code_naf ?? related.codeNaf
+              if (naf) {
+                const nafPrefix = naf.slice(0, 2)
+                if (["47", "46"].includes(nafPrefix)) icpSignals.push(`Commerce (NAF ${naf})`)
+                if (nafPrefix === "47") icpSignals.push("Commerce de detail")
+              }
+
+              // Check forme juridique
+              const forme = companyDetail.forme_juridique ?? related.formeJuridique
+              if (forme && (forme.includes("SAS") || forme.includes("SARL"))) {
+                icpSignals.push(`Societe commerciale (${forme})`)
+              }
             }
+
+            // Check ecommerce via website
+            if (companyDomain) {
+              ecommerce = await isEcommerceSite(companyDomain)
+              if (ecommerce) icpSignals.push("Site ecommerce detecte")
+              icpSignals.push(`Site: ${companyDomain}`)
+            }
+
+            // ICP Score calculation (0-100)
+            let icpScore = 0
+            if (ecommerce) icpScore += 50            // Strong signal: confirmed ecommerce
+            if (companyDomain) icpScore += 10         // Has a website
+            if (icpSignals.some((s) => s.includes("Commerce"))) icpScore += 20 // Commerce NAF code
+            if (icpSignals.some((s) => s.includes("commerciale"))) icpScore += 10 // SAS/SARL
+            if (isClient) icpScore = 100              // Already a client = max
 
             return {
               name: related.name,
@@ -150,9 +196,15 @@ export async function enrichCompanyWithDebug(
               hubspotCompanyId,
               isEcommerce: ecommerce,
               role: related.role,
+              icpScore,
+              icpSignals,
+              excluded: false,
             }
           })
         )
+
+        // Sort by ICP score descending (best fits first)
+        siblingBrands.sort((a, b) => (b.icpScore ?? 0) - (a.icpScore ?? 0))
       }
     } catch (err) {
       debug.pappersError = String(err).slice(0, 200)

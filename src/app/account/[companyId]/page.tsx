@@ -415,26 +415,44 @@ function UpsellSignalsCard({ companyId, signals: initialSignals }: { companyId: 
               )}
               {nonClientSiblings.length > 0 && (
                 <div className="mt-3">
-                  <div className="text-2xs text-text-muted mb-1">
-                    {nonClientSiblings.length} marque{nonClientSiblings.length > 1 ? "s" : ""} du groupe non-cliente{nonClientSiblings.length > 1 ? "s" : ""}
+                  <div className="text-2xs text-text-muted mb-2">
+                    {nonClientSiblings.length} entreprise{nonClientSiblings.length > 1 ? "s" : ""} liee{nonClientSiblings.length > 1 ? "s" : ""} via les dirigeants
                   </div>
-                  <div className="flex flex-wrap gap-1">
-                    {nonClientSiblings.map((sib) => (
-                      <span
-                        key={sib.siren}
-                        className={cn(
-                          "inline-flex items-center gap-1 px-2 py-0.5 text-2xs rounded-full border",
-                          sib.isEcommerce
-                            ? "bg-accent/10 text-accent border-accent/20"
-                            : "bg-gray-100 text-gray-500 border-gray-200"
-                        )}
-                        title={`SIREN ${sib.siren}${sib.role ? ` — ${sib.role}` : ""}${sib.isEcommerce ? " — Ecommerce" : ""}`}
-                      >
-                        {sib.isEcommerce && <Store className="w-2.5 h-2.5" />}
-                        {sib.name}
-                        {sib.role && <span className="text-text-muted">({sib.role.split(" ")[0]})</span>}
-                      </span>
-                    ))}
+                  <div className="space-y-1.5">
+                    {nonClientSiblings.map((sib) => {
+                      const score = sib.icpScore ?? 0
+                      const scoreColor = score >= 50 ? "text-positive bg-positive/10 border-positive/20" :
+                        score >= 20 ? "text-warning bg-warning/10 border-warning/20" :
+                        "text-text-muted bg-gray-100 border-gray-200"
+                      return (
+                        <div key={sib.siren} className="flex items-center gap-2 text-2xs">
+                          <span className={cn("inline-flex items-center justify-center w-8 h-5 rounded border font-mono font-semibold", scoreColor)}>
+                            {score}
+                          </span>
+                          <span className={cn("font-medium", score >= 50 ? "text-text-primary" : "text-text-secondary")}>
+                            {sib.name}
+                          </span>
+                          {sib.isEcommerce && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0 rounded-full bg-positive/10 text-positive border border-positive/20">
+                              <Store className="w-2.5 h-2.5" />Ecommerce
+                            </span>
+                          )}
+                          {sib.icpSignals && sib.icpSignals.length > 0 && (
+                            <span className="text-text-muted truncate" title={sib.icpSignals.join(" | ")}>
+                              {sib.icpSignals.filter((s) => !s.startsWith("Site:")).join(" · ")}
+                            </span>
+                          )}
+                          <a
+                            href={`https://www.pappers.fr/entreprise/${sib.siren}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-auto text-text-muted hover:text-accent flex-shrink-0"
+                          >
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}

@@ -77,7 +77,7 @@ export function computeUpsellScore(input: UpsellScoreInput): UpsellScoreResult {
 export function buildUpsellSignals(params: {
   parentCompany: string | null
   parentSiren: string | null
-  siblingBrands: Array<{ name: string; siren: string; isClient: boolean; hubspotCompanyId?: string }>
+  siblingBrands: Array<{ name: string; siren: string; isClient: boolean; hubspotCompanyId?: string; isEcommerce?: boolean; role?: string; icpScore?: number; icpSignals?: string[]; excluded?: boolean; excludeReason?: string }>
   storesCount: number
   languages: string[]
   subsites: Array<{ lang: string; url: string }>

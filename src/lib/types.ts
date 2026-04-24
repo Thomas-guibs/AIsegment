@@ -141,6 +141,10 @@ export interface UpsellSignals {
     hubspotCompanyId?: string
     isEcommerce?: boolean
     role?: string
+    icpScore?: number      // 0-100 ICP fit score
+    icpSignals?: string[]  // signals that contribute to the score
+    excluded?: boolean
+    excludeReason?: string
   }>
   storesCount: number
   languages: string[]

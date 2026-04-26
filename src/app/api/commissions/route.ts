@@ -97,44 +97,51 @@ export async function GET(request: NextRequest) {
         // Companies that have at least 1 deal with payment_date < monthStart
         // AND don't have a churn deal with operation_date < monthStart
         const companiesWithPayment = new Set<string>()
-        const companiesChurned = new Set<string>()
+        // MRR de référence = sum of hs_mrr from deals:
+        //   - with date_de_paiement < month start (paid before the month)
+        //   - in Closed Won / Paiement reçu stage
+        //   - with hs_mrr > 0 (exclude renewals at 0)
+        //   - NOT from companies that have an eligible churn with operation_date < month start
 
-        for (const deal of csmDeals) {
-          // Check payment date (deal in paiement reçu or closed won)
-          if (deal.paymentDate && deal.paymentDate < monthStartStr &&
-              CLOSED_WON_STAGES.includes(deal.stage)) {
-            // Need to find which company this deal belongs to
-            // We match by owner since we don't have association data here
-            companiesWithPayment.add("has_payment")
-          }
-        }
-
-        // For company-level check, we need deals associated to each company
-        // Since we don't have company→deal associations, use a simpler approach:
-        // Count companies whose total_revenue > 0 (they've been paying)
-        // and exclude those that appear in churn deals before this month
-
-        // Companies with eligible churn before this month
+        // Step 1: identify churned company names (eligible churns before this month)
         const churnedCompanyNames = new Set<string>()
         for (const deal of csmDeals) {
           if (deal.attribution === ATTRIBUTION.CHURN && deal.eligible &&
               deal.operationDate && deal.operationDate < monthStartStr) {
+            // Extract company name from deal name (deals often named "Company - Type")
             churnedCompanyNames.add(deal.name.toLowerCase())
           }
         }
 
-        // MRR reference: companies with MRR > 0, not churned
+        // Step 2: sum hs_mrr from paid deals, excluding churned companies
         let mrrReference = 0
         let companiesInPortfolio = 0
-        for (const company of csmCompanies) {
-          if (company.mrr <= 0) continue
-          // Check if this company has a churn deal (match by name fragments)
-          const companyLower = company.name.toLowerCase()
+        const seenCompanies = new Set<string>()
+
+        // Get paid deals with MRR > 0 before this month
+        const paidDeals = csmDeals.filter((d) =>
+          d.paymentDate &&
+          d.paymentDate < monthStartStr &&
+          CLOSED_WON_STAGES.includes(d.stage) &&
+          d.mrr > 0
+        )
+
+        for (const deal of paidDeals) {
+          // Check if this deal's company has churned
+          const dealLower = deal.name.toLowerCase()
           const isChurned = Array.from(churnedCompanyNames).some(
-            (churnName) => churnName.includes(companyLower) || companyLower.includes(churnName.split(" - ")[0])
+            (churnName) => {
+              const churnCompany = churnName.split(" - ")[0].trim()
+              const dealCompany = dealLower.split(" - ")[0].trim()
+              return churnCompany.includes(dealCompany) || dealCompany.includes(churnCompany)
+            }
           )
-          if (!isChurned) {
-            mrrReference += company.mrr
+          if (isChurned) continue
+
+          mrrReference += deal.mrr
+          const companyKey = deal.name.split(" - ")[0].trim().toLowerCase()
+          if (!seenCompanies.has(companyKey)) {
+            seenCompanies.add(companyKey)
             companiesInPortfolio++
           }
         }

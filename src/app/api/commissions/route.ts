@@ -158,28 +158,34 @@ export async function GET(request: NextRequest) {
         let downsellMrr = 0
 
         for (const deal of csmDeals) {
-          const dealMrr = deal.mrr || Math.abs(deal.amount)
+          // For movements (upsell/churn/downsell), use `amount` (the delta),
+          // NOT `hs_mrr` (which is the total contract MRR).
+          // Example: a renewal with hs_mrr=1304 but amount=144 → the upsell is 144.
+          const dealAmount = Math.abs(deal.amount)
 
           // UPSELL: keyed on payment date (date_de_paiement)
           if (deal.attribution === ATTRIBUTION.UPSELL && CLOSED_WON_STAGES.includes(deal.stage)) {
             if (!deal.paymentDate) continue
             if (deal.paymentDate < monthStartStr || deal.paymentDate >= monthEndStr) continue
-            upsellMrr += dealMrr
-            upsellDeals.push({ id: deal.id, name: deal.name, mrr: dealMrr, date: deal.paymentDate })
+            if (dealAmount === 0) continue
+            upsellMrr += dealAmount
+            upsellDeals.push({ id: deal.id, name: deal.name, mrr: dealAmount, date: deal.paymentDate })
           }
           // CHURN: keyed on operation date + must be eligible
           else if (deal.attribution === ATTRIBUTION.CHURN && deal.eligible) {
             if (!deal.operationDate) continue
             if (deal.operationDate < monthStartStr || deal.operationDate >= monthEndStr) continue
-            churnMrr += Math.abs(dealMrr)
-            churnDeals.push({ id: deal.id, name: deal.name, mrr: Math.abs(dealMrr), date: deal.operationDate })
+            if (dealAmount === 0) continue
+            churnMrr += dealAmount
+            churnDeals.push({ id: deal.id, name: deal.name, mrr: dealAmount, date: deal.operationDate })
           }
           // DOWNSELL: keyed on operation date + must be eligible
           else if (deal.attribution === ATTRIBUTION.DOWNSELL && deal.eligible) {
             if (!deal.operationDate) continue
             if (deal.operationDate < monthStartStr || deal.operationDate >= monthEndStr) continue
-            downsellMrr += Math.abs(dealMrr)
-            downsellDeals.push({ id: deal.id, name: deal.name, mrr: Math.abs(dealMrr), date: deal.operationDate })
+            if (dealAmount === 0) continue
+            downsellMrr += dealAmount
+            downsellDeals.push({ id: deal.id, name: deal.name, mrr: dealAmount, date: deal.operationDate })
           }
         }
 

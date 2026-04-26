@@ -265,6 +265,7 @@ export const DEAL_PROPERTIES = [
   "attribution",
   "renewall_date",
   "date_de_prise_en_compte",
+  "date_de_paiement",
   "expected_closing_date",
   "closedate",
   "dealstage",

@@ -91,13 +91,16 @@ export async function GET(request: NextRequest) {
       const csmCompanies = allCompanies.filter((c) => c.ownerId === csm.id)
       const csmCompanyNames = new Set(csmCompanies.map((c) => c.name.toLowerCase()))
 
-      // Match deals to CSM's companies by name (not by deal owner)
-      // A deal belongs to this CSM if its company name matches one of their companies
-      const csmDeals = deals.filter((d) => {
+      // For MRR reference: deals matched to CSM's companies by name
+      const companyDeals = deals.filter((d) => {
         const dealCompany = getCompanyFromDeal(d.name)
         return csmCompanyNames.has(dealCompany) ||
           Array.from(csmCompanyNames).some((cn) => cn.includes(dealCompany) || dealCompany.includes(cn))
       })
+
+      // For movements (upsell/churn/downsell): deals owned by the CSM
+      // This is the "Propriétaire de la transaction" in HubSpot
+      const ownedDeals = deals.filter((d) => d.ownerId === csm.id)
 
       // ================================================================
       // Group deals by company name for MRR reference calculation
@@ -106,11 +109,12 @@ export async function GET(request: NextRequest) {
       // Then check if a churn deal exists with hs_mrr = total of the company
       // If churn amount = company total → company fully churned
       // ================================================================
-      const companyDeals = new Map<string, typeof csmDeals>()
-      for (const deal of csmDeals) {
+      // Group company deals by company name for MRR reference
+      const companyDealsMap = new Map<string, typeof companyDeals>()
+      for (const deal of companyDeals) {
         const companyKey = getCompanyFromDeal(deal.name)
-        if (!companyDeals.has(companyKey)) companyDeals.set(companyKey, [])
-        companyDeals.get(companyKey)!.push(deal)
+        if (!companyDealsMap.has(companyKey)) companyDealsMap.set(companyKey, [])
+        companyDealsMap.get(companyKey)!.push(deal)
       }
 
       const monthResults: CommissionMonth[] = months.map((month) => {
@@ -128,8 +132,8 @@ export async function GET(request: NextRequest) {
         let mrrReference = 0
         let companiesInPortfolio = 0
 
-        for (const companyKey of Array.from(companyDeals.keys())) {
-          const compDeals = companyDeals.get(companyKey)!
+        for (const companyKey of Array.from(companyDealsMap.keys())) {
+          const compDeals = companyDealsMap.get(companyKey)!
           // Total hs_mrr from paid transactions for this company
           const paidDeals = compDeals.filter((d) =>
             d.paymentDate &&
@@ -176,7 +180,7 @@ export async function GET(request: NextRequest) {
         let churnMrr = 0
         let downsellMrr = 0
 
-        for (const deal of csmDeals) {
+        for (const deal of ownedDeals) {
           const dealAmount = Math.abs(deal.amount)
 
           if (deal.attribution === ATTRIBUTION.UPSELL && CLOSED_WON_STAGES.includes(deal.stage)) {

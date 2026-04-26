@@ -78,6 +78,7 @@ export async function GET(request: NextRequest) {
       operationDate: raw.properties.date_de_prise_en_compte?.slice(0, 10) ?? null,
       stage: raw.properties.dealstage ?? "",
       ownerId: raw.properties.hubspot_owner_id ?? null,
+      eligible: raw.properties.deal_eligibility === "true",
     }))
 
     // Fetch all companies (for MRR reference)
@@ -113,10 +114,10 @@ export async function GET(request: NextRequest) {
         // Count companies whose total_revenue > 0 (they've been paying)
         // and exclude those that appear in churn deals before this month
 
-        // Companies with churn before this month
+        // Companies with eligible churn before this month
         const churnedCompanyNames = new Set<string>()
         for (const deal of csmDeals) {
-          if (deal.attribution === ATTRIBUTION.CHURN &&
+          if (deal.attribution === ATTRIBUTION.CHURN && deal.eligible &&
               deal.operationDate && deal.operationDate < monthStartStr) {
             churnedCompanyNames.add(deal.name.toLowerCase())
           }
@@ -138,7 +139,9 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // Monthly movements (deals with operation_date in this month)
+        // Monthly movements
+        // UPSELL: uses date_de_paiement (payment date) as the reference date
+        // CHURN/DOWNSELL: uses date_de_prise_en_compte (operation date) + deal_eligibility must be "true"
         const upsellDeals: CommissionMonth["upsellDeals"] = []
         const churnDeals: CommissionMonth["churnDeals"] = []
         const downsellDeals: CommissionMonth["downsellDeals"] = []
@@ -148,18 +151,26 @@ export async function GET(request: NextRequest) {
         let downsellMrr = 0
 
         for (const deal of csmDeals) {
-          if (!deal.operationDate) continue
-          if (deal.operationDate < monthStartStr || deal.operationDate >= monthEndStr) continue
-
           const dealMrr = deal.mrr || Math.abs(deal.amount)
 
+          // UPSELL: keyed on payment date (date_de_paiement)
           if (deal.attribution === ATTRIBUTION.UPSELL && CLOSED_WON_STAGES.includes(deal.stage)) {
+            if (!deal.paymentDate) continue
+            if (deal.paymentDate < monthStartStr || deal.paymentDate >= monthEndStr) continue
             upsellMrr += dealMrr
-            upsellDeals.push({ id: deal.id, name: deal.name, mrr: dealMrr, date: deal.operationDate })
-          } else if (deal.attribution === ATTRIBUTION.CHURN) {
+            upsellDeals.push({ id: deal.id, name: deal.name, mrr: dealMrr, date: deal.paymentDate })
+          }
+          // CHURN: keyed on operation date + must be eligible
+          else if (deal.attribution === ATTRIBUTION.CHURN && deal.eligible) {
+            if (!deal.operationDate) continue
+            if (deal.operationDate < monthStartStr || deal.operationDate >= monthEndStr) continue
             churnMrr += Math.abs(dealMrr)
             churnDeals.push({ id: deal.id, name: deal.name, mrr: Math.abs(dealMrr), date: deal.operationDate })
-          } else if (deal.attribution === ATTRIBUTION.DOWNSELL) {
+          }
+          // DOWNSELL: keyed on operation date + must be eligible
+          else if (deal.attribution === ATTRIBUTION.DOWNSELL && deal.eligible) {
+            if (!deal.operationDate) continue
+            if (deal.operationDate < monthStartStr || deal.operationDate >= monthEndStr) continue
             downsellMrr += Math.abs(dealMrr)
             downsellDeals.push({ id: deal.id, name: deal.name, mrr: Math.abs(dealMrr), date: deal.operationDate })
           }

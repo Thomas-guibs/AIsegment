@@ -274,6 +274,7 @@ export const DEAL_PROPERTIES = [
   "createdate",
   "hs_lastmodifieddate",
   "hs_deal_stage_probability",
+  "deal_eligibility",
 ] as const
 
 // Company properties to fetch

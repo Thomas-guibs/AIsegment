@@ -87,8 +87,17 @@ export async function GET(request: NextRequest) {
 
     // Build commissions per CSM
     const csmCommissions: CsmCommission[] = COMMISSION_CSMS.map((csm) => {
+      // Companies assigned to this CSM (via proprietaire_de_l_entreprise__csm_)
       const csmCompanies = allCompanies.filter((c) => c.ownerId === csm.id)
-      const csmDeals = deals.filter((d) => d.ownerId === csm.id)
+      const csmCompanyNames = new Set(csmCompanies.map((c) => c.name.toLowerCase()))
+
+      // Match deals to CSM's companies by name (not by deal owner)
+      // A deal belongs to this CSM if its company name matches one of their companies
+      const csmDeals = deals.filter((d) => {
+        const dealCompany = getCompanyFromDeal(d.name)
+        return csmCompanyNames.has(dealCompany) ||
+          Array.from(csmCompanyNames).some((cn) => cn.includes(dealCompany) || dealCompany.includes(cn))
+      })
 
       // ================================================================
       // Group deals by company name for MRR reference calculation

@@ -96,29 +96,12 @@ export async function GET(request: NextRequest) {
         // MRR de référence:
         // Companies that have at least 1 deal with payment_date < monthStart
         // AND don't have a churn deal with operation_date < monthStart
-        const companiesWithPayment = new Set<string>()
-        // MRR de référence = sum of hs_mrr from deals:
-        //   - with date_de_paiement < month start (paid before the month)
-        //   - in Closed Won / Paiement reçu stage
-        //   - with hs_mrr > 0 (exclude renewals at 0)
-        //   - NOT from companies that have an eligible churn with operation_date < month start
+        // MRR de référence:
+        // = sum of hs_mrr from paid deals (date_de_paiement < month start, Closed Won/Paiement reçu)
+        // MINUS deals where the company has a churn deal with the SAME hs_mrr amount
+        // (matching amount = company has fully churned that contract)
 
-        // Step 1: identify churned company names (eligible churns before this month)
-        const churnedCompanyNames = new Set<string>()
-        for (const deal of csmDeals) {
-          if (deal.attribution === ATTRIBUTION.CHURN && deal.eligible &&
-              deal.operationDate && deal.operationDate < monthStartStr) {
-            // Extract company name from deal name (deals often named "Company - Type")
-            churnedCompanyNames.add(deal.name.toLowerCase())
-          }
-        }
-
-        // Step 2: sum hs_mrr from paid deals, excluding churned companies
-        let mrrReference = 0
-        let companiesInPortfolio = 0
-        const seenCompanies = new Set<string>()
-
-        // Get paid deals with MRR > 0 before this month
+        // Step 1: Get all paid deals before this month
         const paidDeals = csmDeals.filter((d) =>
           d.paymentDate &&
           d.paymentDate < monthStartStr &&
@@ -126,22 +109,35 @@ export async function GET(request: NextRequest) {
           d.mrr > 0
         )
 
+        // Step 2: Get all churn deals (any time, to match against paid deals)
+        const churnDealsAll = csmDeals.filter((d) =>
+          d.attribution === ATTRIBUTION.CHURN
+        )
+
+        // Step 3: For each paid deal, check if there's a churn deal
+        // from the same company with the same hs_mrr amount
+        let mrrReference = 0
+        let companiesInPortfolio = 0
+        const seenCompanies = new Set<string>()
+
         for (const deal of paidDeals) {
-          // Check if this deal's company has churned
-          const dealLower = deal.name.toLowerCase()
-          const isChurned = Array.from(churnedCompanyNames).some(
-            (churnName) => {
-              const churnCompany = churnName.split(" - ")[0].trim()
-              const dealCompany = dealLower.split(" - ")[0].trim()
-              return churnCompany.includes(dealCompany) || dealCompany.includes(churnCompany)
-            }
-          )
-          if (isChurned) continue
+          const dealCompany = deal.name.split(" - ")[0].trim().toLowerCase()
+          const dealMrr = Math.round(deal.mrr * 100) // Compare in cents to avoid float issues
+
+          // Check if a churn deal exists for the same company with matching MRR
+          const hasMatchingChurn = churnDealsAll.some((churn) => {
+            const churnCompany = churn.name.split(" - ")[0].trim().toLowerCase()
+            const churnMrrAbs = Math.round(Math.abs(churn.mrr) * 100)
+            // Same company + same MRR amount = this contract was churned
+            return (churnCompany.includes(dealCompany) || dealCompany.includes(churnCompany)) &&
+                   churnMrrAbs === dealMrr
+          })
+
+          if (hasMatchingChurn) continue
 
           mrrReference += deal.mrr
-          const companyKey = deal.name.split(" - ")[0].trim().toLowerCase()
-          if (!seenCompanies.has(companyKey)) {
-            seenCompanies.add(companyKey)
+          if (!seenCompanies.has(dealCompany)) {
+            seenCompanies.add(dealCompany)
             companiesInPortfolio++
           }
         }

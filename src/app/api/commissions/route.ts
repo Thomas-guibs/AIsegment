@@ -5,12 +5,11 @@ import { hubspotSearch } from "@/lib/hubspot/client"
 import { fetchCustomerCompanies } from "@/lib/hubspot/companies"
 import type { HubSpotDeal } from "@/lib/types"
 import { DEAL_PROPERTIES, CSM_TEAM, SALES_STAGES, ATTRIBUTION } from "@/lib/constants"
-import { parseNumber, parseDate } from "@/lib/utils"
-import { startOfMonth, startOfQuarter, endOfQuarter, addMonths, format } from "date-fns"
+import { parseNumber } from "@/lib/utils"
+import { startOfMonth, addMonths, format } from "date-fns"
 
 const CLOSED_WON_STAGES: string[] = [SALES_STAGES.CLOSED_WON, SALES_STAGES.PAIEMENT_RECU]
 
-// Only 4 active CSMs get commissions
 const COMMISSION_CSMS = CSM_TEAM.filter(
   (c) => c.id !== "1949410186" && c.id !== "44919918"
 )
@@ -40,6 +39,10 @@ interface CsmCommission {
   avgMrrReference: number
 }
 
+// Extract company name from deal name (deals are usually "Company - Deal type")
+const getCompanyFromDeal = (dealName: string): string =>
+  dealName.split(" - ")[0].trim().toLowerCase()
+
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
@@ -47,7 +50,6 @@ export async function GET(request: NextRequest) {
     const year = parseInt(searchParams.get("year") ?? String(now.getFullYear()), 10)
     const quarter = parseInt(searchParams.get("quarter") ?? String(Math.ceil((now.getMonth() + 1) / 3)), 10)
 
-    // Calculate the 3 months of the quarter
     const quarterStart = new Date(year, (quarter - 1) * 3, 1)
     const months = [0, 1, 2].map((i) => {
       const d = addMonths(quarterStart, i)
@@ -58,7 +60,7 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    // Fetch all deals with payment dates and attributions (cached)
+    // Fetch all deals with payment dates or attributions
     const allDeals = await hubspotSearch<HubSpotDeal>("deals", {
       filterGroups: [
         { filters: [{ propertyName: "date_de_paiement", operator: "HAS_PROPERTY" }] },
@@ -67,7 +69,6 @@ export async function GET(request: NextRequest) {
       properties: [...DEAL_PROPERTIES],
     }, `commission_deals_${year}_Q${quarter}`)
 
-    // Parse deals
     const deals = allDeals.map((raw) => ({
       id: raw.id,
       name: raw.properties.dealname ?? "",
@@ -81,7 +82,7 @@ export async function GET(request: NextRequest) {
       eligible: raw.properties.deal_eligibility === "true",
     }))
 
-    // Fetch all companies (for MRR reference)
+    // Fetch all companies for CSM assignment
     const allCompanies = await fetchCustomerCompanies()
 
     // Build commissions per CSM
@@ -89,62 +90,75 @@ export async function GET(request: NextRequest) {
       const csmCompanies = allCompanies.filter((c) => c.ownerId === csm.id)
       const csmDeals = deals.filter((d) => d.ownerId === csm.id)
 
+      // ================================================================
+      // Group deals by company name for MRR reference calculation
+      // ================================================================
+      // For each company: sum all hs_mrr from paid transactions
+      // Then check if a churn deal exists with hs_mrr = total of the company
+      // If churn amount = company total → company fully churned
+      // ================================================================
+      const companyDeals = new Map<string, typeof csmDeals>()
+      for (const deal of csmDeals) {
+        const companyKey = getCompanyFromDeal(deal.name)
+        if (!companyDeals.has(companyKey)) companyDeals.set(companyKey, [])
+        companyDeals.get(companyKey)!.push(deal)
+      }
+
       const monthResults: CommissionMonth[] = months.map((month) => {
         const monthStartStr = format(month.start, "yyyy-MM-dd")
         const monthEndStr = format(addMonths(month.start, 1), "yyyy-MM-dd")
 
-        // MRR de référence:
-        // Companies that have at least 1 deal with payment_date < monthStart
-        // AND don't have a churn deal with operation_date < monthStart
-        // MRR de référence:
-        // = sum of hs_mrr from paid deals (date_de_paiement < month start, Closed Won/Paiement reçu)
-        // MINUS deals where the company has a churn deal with the SAME hs_mrr amount
-        // (matching amount = company has fully churned that contract)
-
-        // Step 1: Get all paid deals before this month
-        const paidDeals = csmDeals.filter((d) =>
-          d.paymentDate &&
-          d.paymentDate < monthStartStr &&
-          CLOSED_WON_STAGES.includes(d.stage) &&
-          d.mrr > 0
-        )
-
-        // Step 2: Get all churn deals (any time, to match against paid deals)
-        const churnDealsAll = csmDeals.filter((d) =>
-          d.attribution === ATTRIBUTION.CHURN
-        )
-
-        // Step 3: For each paid deal, check if there's a churn deal
-        // from the same company with the same hs_mrr amount
+        // ================================================================
+        // MRR de référence = for each company of the CSM:
+        //   1. Sum all hs_mrr from paid deals (date_de_paiement exists, Closed Won/Paiement reçu)
+        //   2. Check if a churn deal exists where hs_mrr = total of all paid deals
+        //      AND churn operation_date < month start
+        //   3. If yes → company fully churned → exclude from MRR ref for this month
+        //   4. If no → company's total hs_mrr counts
+        // ================================================================
         let mrrReference = 0
         let companiesInPortfolio = 0
-        const seenCompanies = new Set<string>()
 
-        for (const deal of paidDeals) {
-          const dealCompany = deal.name.split(" - ")[0].trim().toLowerCase()
-          const dealMrr = Math.round(deal.mrr * 100) // Compare in cents to avoid float issues
+        for (const companyKey of Array.from(companyDeals.keys())) {
+          const compDeals = companyDeals.get(companyKey)!
+          // Total hs_mrr from paid transactions for this company
+          const paidDeals = compDeals.filter((d) =>
+            d.paymentDate &&
+            d.paymentDate < monthStartStr &&
+            CLOSED_WON_STAGES.includes(d.stage) &&
+            d.mrr > 0
+          )
+          if (paidDeals.length === 0) continue
 
-          // Check if a churn deal exists for the same company with matching MRR
-          const hasMatchingChurn = churnDealsAll.some((churn) => {
-            const churnCompany = churn.name.split(" - ")[0].trim().toLowerCase()
-            const churnMrrAbs = Math.round(Math.abs(churn.mrr) * 100)
-            // Same company + same MRR amount = this contract was churned
-            return (churnCompany.includes(dealCompany) || dealCompany.includes(churnCompany)) &&
-                   churnMrrAbs === dealMrr
-          })
+          const companyTotalMrr = paidDeals.reduce((sum, d) => sum + d.mrr, 0)
+          const companyTotalMrrCents = Math.round(companyTotalMrr * 100)
 
-          if (hasMatchingChurn) continue
+          // Check if a churn deal matches the total (company fully churned)
+          // AND the churn operation_date is BEFORE this month start
+          const churnDealsForCompany = compDeals.filter((d) =>
+            d.attribution === ATTRIBUTION.CHURN &&
+            d.operationDate &&
+            d.operationDate < monthStartStr
+          )
 
-          mrrReference += deal.mrr
-          if (!seenCompanies.has(dealCompany)) {
-            seenCompanies.add(dealCompany)
-            companiesInPortfolio++
+          const churnTotalMrrCents = churnDealsForCompany.reduce(
+            (sum, d) => sum + Math.round(Math.abs(d.mrr) * 100), 0
+          )
+
+          // If churn total >= company paid total → fully churned → exclude
+          if (churnTotalMrrCents >= companyTotalMrrCents && churnDealsForCompany.length > 0) {
+            continue
           }
+
+          mrrReference += companyTotalMrr
+          companiesInPortfolio++
         }
 
+        // ================================================================
         // Monthly movements
-        // UPSELL: uses date_de_paiement (payment date) as the reference date
-        // CHURN/DOWNSELL: uses date_de_prise_en_compte (operation date) + deal_eligibility must be "true"
+        // UPSELL: date_de_paiement in month, amount (delta), Closed Won stage
+        // CHURN/DOWNSELL: date_de_prise_en_compte in month, deal_eligibility = true, amount
+        // ================================================================
         const upsellDeals: CommissionMonth["upsellDeals"] = []
         const churnDeals: CommissionMonth["churnDeals"] = []
         const downsellDeals: CommissionMonth["downsellDeals"] = []
@@ -154,29 +168,21 @@ export async function GET(request: NextRequest) {
         let downsellMrr = 0
 
         for (const deal of csmDeals) {
-          // For movements (upsell/churn/downsell), use `amount` (the delta),
-          // NOT `hs_mrr` (which is the total contract MRR).
-          // Example: a renewal with hs_mrr=1304 but amount=144 → the upsell is 144.
           const dealAmount = Math.abs(deal.amount)
 
-          // UPSELL: keyed on payment date (date_de_paiement)
           if (deal.attribution === ATTRIBUTION.UPSELL && CLOSED_WON_STAGES.includes(deal.stage)) {
             if (!deal.paymentDate) continue
             if (deal.paymentDate < monthStartStr || deal.paymentDate >= monthEndStr) continue
             if (dealAmount === 0) continue
             upsellMrr += dealAmount
             upsellDeals.push({ id: deal.id, name: deal.name, mrr: dealAmount, date: deal.paymentDate })
-          }
-          // CHURN: keyed on operation date + must be eligible
-          else if (deal.attribution === ATTRIBUTION.CHURN && deal.eligible) {
+          } else if (deal.attribution === ATTRIBUTION.CHURN && deal.eligible) {
             if (!deal.operationDate) continue
             if (deal.operationDate < monthStartStr || deal.operationDate >= monthEndStr) continue
             if (dealAmount === 0) continue
             churnMrr += dealAmount
             churnDeals.push({ id: deal.id, name: deal.name, mrr: dealAmount, date: deal.operationDate })
-          }
-          // DOWNSELL: keyed on operation date + must be eligible
-          else if (deal.attribution === ATTRIBUTION.DOWNSELL && deal.eligible) {
+          } else if (deal.attribution === ATTRIBUTION.DOWNSELL && deal.eligible) {
             if (!deal.operationDate) continue
             if (deal.operationDate < monthStartStr || deal.operationDate >= monthEndStr) continue
             if (dealAmount === 0) continue

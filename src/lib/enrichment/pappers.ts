@@ -111,11 +111,13 @@ export interface PappersResult {
 // discovered company, until no new ones are found or limits are hit.
 // =============================================================================
 
-const MAX_CARTO_API_CALLS = 15
-const MAX_CARTO_COMPANIES = 50
+const MAX_CARTO_API_CALLS = 20
+const MAX_CARTO_COMPANIES = 100
 
-// Extract linked companies from a cartographie response
-// The response structure may vary — handle multiple possible shapes
+// Extract linked companies from a cartographie response.
+// Pappers v2 cartographie response shape:
+//   { entreprises: [{id, siren, nom_entreprise}], personnes: [...],
+//     liens_entreprises_personnes: [...], liens_entreprises_entreprises: [...] }
 function extractLinkedCompanies(data: any): Array<{
   siren: string
   denomination: string
@@ -133,26 +135,35 @@ function extractLinkedCompanies(data: any): Array<{
     cessee?: boolean
   }> = []
 
-  // Try known response shapes
-  const sources: any[][] = [
+  // Primary shape: data.entreprises array
+  if (Array.isArray(data.entreprises)) {
+    for (const ent of data.entreprises) {
+      const siren = ent.siren ?? ent.siren_entreprise
+      if (!siren || typeof siren !== "string") continue
+      results.push({
+        siren,
+        denomination: ent.nom_entreprise ?? ent.denomination ?? ent.nom ?? "Unknown",
+        codeNaf: ent.code_naf ?? undefined,
+        formeJuridique: ent.forme_juridique ?? undefined,
+        typeLien: "Cartographie",
+        cessee: ent.entreprise_cessee ?? false,
+      })
+    }
+  }
+
+  // Fallback shapes (older or alternative API responses)
+  const fallbackSources: any[][] = [
     data.entreprises_liees ?? [],
     data.filiales ?? [],
     data.participations ?? [],
     data.liens ?? [],
   ]
-
-  // Also check nested "noeuds" (nodes) if present — graph-style response
-  if (Array.isArray(data.noeuds)) {
-    for (const noeud of data.noeuds) {
-      if (noeud.entreprise) sources.push([noeud.entreprise])
-      if (Array.isArray(noeud.entreprises)) sources.push(noeud.entreprises)
-    }
-  }
-
-  for (const list of sources) {
+  for (const list of fallbackSources) {
     for (const ent of list) {
       const siren = ent.siren ?? ent.siren_entreprise
       if (!siren || typeof siren !== "string") continue
+      // Skip if already added
+      if (results.some((r) => r.siren === siren)) continue
       results.push({
         siren,
         denomination: ent.denomination ?? ent.nom_entreprise ?? ent.nom ?? "Unknown",
@@ -165,6 +176,16 @@ function extractLinkedCompanies(data: any): Array<{
   }
 
   return results
+}
+
+// Companies whose name suggests they're a holding/SCI — still useful as graph
+// hubs but should NOT be displayed as ICP candidates.
+// SCI patterns are dead-end (rental real estate); holdings often connect to
+// operating brands so we keep traversing through them.
+function isGraphTraversable(name: string): boolean {
+  // SCI / association / fondation = dead-end nodes (rental, not operational)
+  if (/\b(sci|scpi|scea|association|fondation|syndicat)\b/i.test(name)) return false
+  return true
 }
 
 async function exploreGroupCartography(
@@ -206,14 +227,15 @@ async function exploreGroupCartography(
         excludeReason: reason,
       })
 
-      // Only enqueue non-excluded companies for deeper exploration
-      if (!excluded) {
+      // Traversal policy: enqueue all non-dead-end nodes (including holdings)
+      // Holdings often link to operating brands we want to discover
+      if (isGraphTraversable(ent.denomination)) {
         queue.push(ent.siren)
         newFound++
       }
     }
 
-    console.log(`[carto:${siren}] +${newFound} new (total=${allCompanies.length}, queue=${queue.length})`)
+    console.log(`[carto:${siren}] +${newFound} new traversable (total=${allCompanies.length}, queue=${queue.length})`)
   }
 
   console.log(`[carto] BFS done: ${allCompanies.length} companies, ${apiCalls} API calls`)

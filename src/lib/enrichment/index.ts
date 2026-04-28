@@ -8,7 +8,7 @@ import {
   cleanDomain,
   detectEcommerce,
   guessDomain,
-  isEcommerceNaf,
+  getNafCommerceSignal,
 } from "./website"
 import { enrichWithPappers, fetchPappersCompany } from "./pappers"
 import { extractWithClaude } from "./claude"
@@ -149,6 +149,7 @@ export async function enrichCompanyWithDebug(
 
             // Try to find company website via Pappers company detail
             let companyDomain: string | null = null
+            let domainValidated = false
             let ecommerce = false
             let platform: string | null = null
             let fit: "strong" | "partial" | "none" = "none"
@@ -156,31 +157,43 @@ export async function enrichCompanyWithDebug(
 
             // Fetch company detail to get website/domain
             const companyDetail = await fetchPappersCompany(related.siren)
+            const naf = companyDetail?.code_naf ?? related.codeNaf
+            const nafSignal = getNafCommerceSignal(naf)
+            const forme = companyDetail?.forme_juridique ?? related.formeJuridique
+
             if (companyDetail) {
               // site_web only — domaine_activite is the NAF description, not a URL
               const siteWeb: string | null = companyDetail.site_web ?? null
               if (siteWeb) {
                 companyDomain = siteWeb.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0]
-              }
-
-              // NAF code → commerce signal
-              const naf = companyDetail.code_naf ?? related.codeNaf
-              if (naf && isEcommerceNaf(naf)) {
-                icpSignals.push(`Commerce (NAF ${naf})`)
-                if (naf.slice(0, 2) === "47") icpSignals.push("Commerce de detail")
-              }
-
-              // Forme juridique
-              const forme = companyDetail.forme_juridique ?? related.formeJuridique
-              if (forme && (forme.includes("SAS") || forme.includes("SARL"))) {
-                icpSignals.push(`Societe commerciale (${forme})`)
+                domainValidated = true   // Pappers-sourced → trust it
+                icpSignals.push(`Site Pappers: ${companyDomain}`)
               }
             }
 
-            // Fallback: if Pappers has no site_web, infer the domain from the company name
+            // NAF signal
+            if (nafSignal === "strong") {
+              icpSignals.push(`NAF ${naf} — Vente à distance`)
+            } else if (nafSignal === "weak" && naf) {
+              icpSignals.push(`Commerce (NAF ${naf})`)
+            }
+            if (forme && (forme.includes("SAS") || forme.includes("SARL"))) {
+              icpSignals.push(`Societe commerciale (${forme})`)
+            }
+
+            // Fallback: if Pappers has no site_web, infer the domain from the name
+            // SIREN validation eliminates homonyms (a key false-positive risk)
             if (!companyDomain) {
-              companyDomain = await guessDomain(related.name)
-              if (companyDomain) icpSignals.push("Domaine inferé du nom")
+              const guess = await guessDomain(related.name, related.siren)
+              if (guess.domain) {
+                companyDomain = guess.domain
+                domainValidated = guess.validated
+                icpSignals.push(
+                  guess.validated
+                    ? `Domaine inferé + validé SIREN: ${guess.domain}`
+                    : `Domaine inferé (non validé): ${guess.domain}`,
+                )
+              }
             }
 
             // Check ecommerce platform on the resolved domain
@@ -190,17 +203,19 @@ export async function enrichCompanyWithDebug(
               platform = detection.platform
               fit = detection.fit
               if (ecommerce && platform) icpSignals.push(`Plateforme: ${platform}`)
-              icpSignals.push(`Site: ${companyDomain}`)
             }
 
             // ICP Score calculation (0-100)
             let icpScore = 0
-            if (fit === "strong") icpScore += 60                                      // Shopify / PrestaShop
-            else if (fit === "partial") icpScore += 40                                // WooCommerce / generic
-            if (companyDomain) icpScore += 10                                         // Has a website
-            if (icpSignals.some((s) => s.includes("Commerce"))) icpScore += 20        // Commerce NAF
-            if (icpSignals.some((s) => s.includes("commerciale"))) icpScore += 10     // SAS/SARL
-            if (isClient) icpScore = 100                                              // Already a client
+            if (fit === "strong") icpScore += 60                            // Shopify / PrestaShop
+            else if (fit === "partial") icpScore += 40                      // WooCommerce / generic
+            if (nafSignal === "strong") icpScore += 30                      // NAF 47.91
+            else if (nafSignal === "weak") icpScore += 15                   // NAF 47.xx / 46.xx
+            if (companyDomain && domainValidated) icpScore += 10            // Validated website
+            else if (companyDomain) icpScore += 5                           // Unvalidated guess
+            if (forme && (forme.includes("SAS") || forme.includes("SARL"))) icpScore += 5
+            if (isClient) icpScore = 100                                    // Already a client
+            if (icpScore > 100) icpScore = 100
 
             return {
               name: related.name,

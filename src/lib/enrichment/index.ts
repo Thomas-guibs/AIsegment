@@ -161,6 +161,13 @@ export async function enrichCompanyWithDebug(
             const nafSignal = getNafCommerceSignal(naf)
             const forme = companyDetail?.forme_juridique ?? related.formeJuridique
 
+            // Log Pappers response fields for domain discovery debug
+            if (companyDetail) {
+              console.log(`[domain:${related.siren}] ${related.name} | site_web=${companyDetail.site_web ?? "null"} nom_commercial=${companyDetail.nom_commercial ?? "null"} enseignes=${JSON.stringify(companyDetail.enseignes ?? [])} noms_de_domaine=${JSON.stringify(companyDetail.noms_de_domaine ?? [])}`)
+            } else {
+              console.log(`[domain:${related.siren}] ${related.name} | no companyDetail`)
+            }
+
             if (companyDetail) {
               // 1. site_web — direct URL (best source)
               const siteWeb: string | null = companyDetail.site_web ?? null
@@ -205,6 +212,7 @@ export async function enrichCompanyWithDebug(
               // Try commercial name first (often matches the real brand domain)
               if (commercialName && commercialName.toLowerCase() !== related.name.toLowerCase()) {
                 const guess = await guessDomain(commercialName, related.siren)
+                console.log(`[domain:${related.siren}] guess nom_commercial="${commercialName}" → ${guess.domain ?? "null"} validated=${guess.validated} tested=${guess.tested} resolved=${guess.resolved}`)
                 if (guess.domain) {
                   companyDomain = guess.domain
                   domainValidated = guess.validated
@@ -219,6 +227,7 @@ export async function enrichCompanyWithDebug(
               // Then try the legal name (denomination)
               if (!companyDomain) {
                 const guess = await guessDomain(related.name, related.siren)
+                console.log(`[domain:${related.siren}] guess denomination="${related.name}" → ${guess.domain ?? "null"} validated=${guess.validated} tested=${guess.tested} resolved=${guess.resolved}`)
                 if (guess.domain) {
                   companyDomain = guess.domain
                   domainValidated = guess.validated
@@ -230,6 +239,8 @@ export async function enrichCompanyWithDebug(
                 }
               }
             }
+
+            console.log(`[domain:${related.siren}] RESULT domain=${companyDomain ?? "null"} validated=${domainValidated}`)
 
             // Check ecommerce platform on the resolved domain
             if (companyDomain) {

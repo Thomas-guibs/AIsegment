@@ -11,6 +11,7 @@ import {
   getNafCommerceSignal,
 } from "./website"
 import { enrichWithPappers, fetchPappersCompany } from "./pappers"
+import { findDomainViaBrave } from "./brave"
 import { extractWithClaude } from "./claude"
 import type { UpsellSignals } from "../types"
 import { buildUpsellSignals } from "../scoring/upsell"
@@ -236,6 +237,18 @@ export async function enrichCompanyWithDebug(
                       ? `Domaine inferé + validé SIREN: ${guess.domain}`
                       : `Domaine inferé (non validé): ${guess.domain}`,
                   )
+                }
+              }
+
+              // Last resort: Brave Search (paid, ~2k req/mo free quota)
+              // Used when name inference fails — handles cases where the brand
+              // (e.g. "Musc Intime") differs from the legal name (e.g. "SEKAYA")
+              if (!companyDomain) {
+                const brave = await findDomainViaBrave(related.name, related.siren)
+                if (brave.domain) {
+                  companyDomain = brave.domain
+                  domainValidated = true   // SIREN was in the query → high confidence
+                  icpSignals.push(`Domaine via Brave Search: ${brave.domain}`)
                 }
               }
             }

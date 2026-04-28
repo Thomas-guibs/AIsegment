@@ -155,19 +155,29 @@ export async function enrichCompanyWithDebug(
             let fit: "strong" | "partial" | "none" = "none"
             const icpSignals: string[] = []
 
-            // Fetch company detail to get website/domain
+            // Fetch company detail to get website/domain + commercial name
             const companyDetail = await fetchPappersCompany(related.siren)
             const naf = companyDetail?.code_naf ?? related.codeNaf
             const nafSignal = getNafCommerceSignal(naf)
             const forme = companyDetail?.forme_juridique ?? related.formeJuridique
 
             if (companyDetail) {
-              // site_web only — domaine_activite is the NAF description, not a URL
+              // 1. site_web — direct URL (best source)
               const siteWeb: string | null = companyDetail.site_web ?? null
               if (siteWeb) {
                 companyDomain = siteWeb.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0]
-                domainValidated = true   // Pappers-sourced → trust it
+                domainValidated = true
                 icpSignals.push(`Site Pappers: ${companyDomain}`)
+              }
+
+              // 2. noms_de_domaine — array of domains registered to the company (RCS data)
+              if (!companyDomain && Array.isArray(companyDetail.noms_de_domaine)) {
+                const domains: string[] = companyDetail.noms_de_domaine
+                if (domains.length > 0) {
+                  companyDomain = domains[0].replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0]
+                  domainValidated = true
+                  icpSignals.push(`Domaine RCS: ${companyDomain}`)
+                }
               }
             }
 
@@ -181,18 +191,43 @@ export async function enrichCompanyWithDebug(
               icpSignals.push(`Societe commerciale (${forme})`)
             }
 
-            // Fallback: if Pappers has no site_web, infer the domain from the name
-            // SIREN validation eliminates homonyms (a key false-positive risk)
+            // Fallback: infer domain from name
+            // Try nom_commercial first (e.g. "Musc Intime" → muscintime.fr)
+            // then denomination (e.g. "SEKAYA" → sekaya.fr)
+            // SIREN validation eliminates homonyms
             if (!companyDomain) {
-              const guess = await guessDomain(related.name, related.siren)
-              if (guess.domain) {
-                companyDomain = guess.domain
-                domainValidated = guess.validated
-                icpSignals.push(
-                  guess.validated
-                    ? `Domaine inferé + validé SIREN: ${guess.domain}`
-                    : `Domaine inferé (non validé): ${guess.domain}`,
-                )
+              const commercialName: string | null =
+                companyDetail?.nom_commercial ??
+                (Array.isArray(companyDetail?.enseignes) && companyDetail.enseignes.length > 0
+                  ? companyDetail.enseignes[0]
+                  : null)
+
+              // Try commercial name first (often matches the real brand domain)
+              if (commercialName && commercialName.toLowerCase() !== related.name.toLowerCase()) {
+                const guess = await guessDomain(commercialName, related.siren)
+                if (guess.domain) {
+                  companyDomain = guess.domain
+                  domainValidated = guess.validated
+                  icpSignals.push(
+                    guess.validated
+                      ? `Domaine (nom commercial) validé: ${guess.domain}`
+                      : `Domaine (nom commercial): ${guess.domain}`,
+                  )
+                }
+              }
+
+              // Then try the legal name (denomination)
+              if (!companyDomain) {
+                const guess = await guessDomain(related.name, related.siren)
+                if (guess.domain) {
+                  companyDomain = guess.domain
+                  domainValidated = guess.validated
+                  icpSignals.push(
+                    guess.validated
+                      ? `Domaine inferé + validé SIREN: ${guess.domain}`
+                      : `Domaine inferé (non validé): ${guess.domain}`,
+                  )
+                }
               }
             }
 

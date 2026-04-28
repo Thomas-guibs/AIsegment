@@ -40,6 +40,18 @@ export async function GET(request: NextRequest) {
     carto = { error: String(e).slice(0, 200) }
   }
 
+  // Inspect etablissements for enseigne / nom_commercial
+  const etabSample = Array.isArray(data.etablissements)
+    ? data.etablissements.slice(0, 5).map((e: any) => ({
+        siret: e.siret ?? null,
+        siege: e.siege ?? null,
+        enseigne: e.enseigne ?? null,
+        nom_commercial: e.nom_commercial ?? null,
+        etablissement_employeur: e.etablissement_employeur ?? null,
+        all_keys: Object.keys(e),
+      }))
+    : null
+
   return NextResponse.json({
     entreprise: {
       siren: data.siren,
@@ -54,6 +66,8 @@ export async function GET(request: NextRequest) {
       libelle_code_naf: data.libelle_code_naf ?? null,
       forme_juridique: data.forme_juridique ?? null,
       objet_social: data.objet_social?.slice(0, 300) ?? null,
+      etablissements_count: Array.isArray(data.etablissements) ? data.etablissements.length : 0,
+      etablissements_sample: etabSample,
       all_keys: Object.keys(data).sort(),
     },
     cartographie: carto,

@@ -225,23 +225,104 @@ export function extractSubsites(html: string, baseDomain: string): Array<{ lang:
   return subsites
 }
 
+export type EcommercePlatform = "Shopify" | "WooCommerce" | "PrestaShop" | "Magento" | "BigCommerce" | "Shopware" | "Generic"
+
+export interface EcommerceDetection {
+  isEcommerce: boolean
+  platform: EcommercePlatform | null
+  fit: "strong" | "partial" | "none"
+}
+
 // Check if a domain looks like an ecommerce site (ICP for Loyoly)
 export async function isEcommerceSite(domain: string): Promise<boolean> {
+  const detection = await detectEcommerce(domain)
+  return detection.isEcommerce
+}
+
+// Detect ecommerce platform on a domain (Shopify, PrestaShop, WooCommerce...)
+export async function detectEcommerce(domain: string): Promise<EcommerceDetection> {
   const html = await fetchPage(`https://${domain}/`, 3000)
-  if (!html) return false
+  if (!html) return { isEcommerce: false, platform: null, fit: "none" }
   const lower = html.toLowerCase()
-  // Platform indicators
-  if (lower.includes("shopify") || lower.includes("woocommerce") ||
-      lower.includes("prestashop") || lower.includes("magento") ||
-      lower.includes("bigcommerce") || lower.includes("shopware")) return true
-  // Cart/checkout indicators
-  if (lower.includes("/cart") || lower.includes("/panier") ||
-      lower.includes("add-to-cart") || lower.includes("ajouter-au-panier") ||
-      lower.includes("/checkout") || lower.includes("/commande")) return true
-  // Product indicators
-  if (lower.includes("/products/") || lower.includes("/produit/") ||
-      lower.includes("/collections/") || lower.includes("/categorie-produit/")) return true
-  return false
+
+  // Strong-fit platforms (high Loyoly conversion intent)
+  if (lower.includes("cdn.shopify.com") || lower.includes("shopify.com") || lower.includes("shopify-section")) {
+    return { isEcommerce: true, platform: "Shopify", fit: "strong" }
+  }
+  if (lower.includes("prestashop") || lower.includes("/themes/prestashop")) {
+    return { isEcommerce: true, platform: "PrestaShop", fit: "strong" }
+  }
+
+  // Partial-fit platforms
+  if (lower.includes("woocommerce") || lower.includes("wp-content/plugins/woocommerce")) {
+    return { isEcommerce: true, platform: "WooCommerce", fit: "partial" }
+  }
+  if (lower.includes("magento") || lower.includes("mage/cookies")) {
+    return { isEcommerce: true, platform: "Magento", fit: "partial" }
+  }
+  if (lower.includes("bigcommerce")) {
+    return { isEcommerce: true, platform: "BigCommerce", fit: "partial" }
+  }
+  if (lower.includes("shopware")) {
+    return { isEcommerce: true, platform: "Shopware", fit: "partial" }
+  }
+
+  // Generic ecommerce signals (cart/checkout/products)
+  const cartSignals = lower.includes("/cart") || lower.includes("/panier") ||
+    lower.includes("add-to-cart") || lower.includes("ajouter-au-panier") ||
+    lower.includes("/checkout") || lower.includes("/commande")
+  const productSignals = lower.includes("/products/") || lower.includes("/produit/") ||
+    lower.includes("/collections/") || lower.includes("/categorie-produit/")
+
+  if (cartSignals || productSignals) {
+    return { isEcommerce: true, platform: "Generic", fit: "partial" }
+  }
+  return { isEcommerce: false, platform: null, fit: "none" }
+}
+
+// Try to guess a company's domain from its name
+// Strategy: normalize name (strip legal suffixes, accents, non-alpha) and probe {name}.fr / {name}.com
+export async function guessDomain(companyName: string): Promise<string | null> {
+  const normalized = companyName
+    .replace(/\b(SAS|SARL|SASU|SA|EURL|SNC|GIE|SCI|SCEA|SCM|SELARL)\b/gi, "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase()
+    .trim()
+
+  if (normalized.length < 3) return null
+
+  const candidates = [`${normalized}.fr`, `${normalized}.com`]
+
+  for (const candidate of candidates) {
+    try {
+      const ctrl = new AbortController()
+      const t = setTimeout(() => ctrl.abort(), 2000)
+      const res = await fetch(`https://${candidate}`, {
+        method: "HEAD",
+        signal: ctrl.signal,
+        redirect: "follow",
+        headers: { "User-Agent": USER_AGENT },
+      })
+      clearTimeout(t)
+      // 200 OK, 301/302 redirect, or 405 (HEAD not allowed but server up) = domain is live
+      if (res.ok || res.status === 405 || (res.status >= 300 && res.status < 400)) {
+        return candidate
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return null
+}
+
+// NAF prefixes that signal ecommerce / D2C activity (Loyoly ICP)
+const ECOMMERCE_NAF_PREFIXES = ["47", "46"] // Commerce de détail, Commerce de gros
+
+export function isEcommerceNaf(codeNaf: string | null | undefined): boolean {
+  if (!codeNaf) return false
+  return ECOMMERCE_NAF_PREFIXES.includes(codeNaf.slice(0, 2))
 }
 
 // Helper: clean up the domain

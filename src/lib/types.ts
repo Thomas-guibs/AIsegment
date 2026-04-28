@@ -140,6 +140,9 @@ export interface UpsellSignals {
     isClient: boolean
     hubspotCompanyId?: string
     isEcommerce?: boolean
+    platform?: string | null              // Shopify / PrestaShop / WooCommerce / Magento / BigCommerce / Shopware / Generic
+    fit?: "strong" | "partial" | "none"   // Loyoly fit based on platform detected
+    domain?: string | null                // Resolved domain (from Pappers or inferred)
     role?: string
     icpScore?: number      // 0-100 ICP fit score
     icpSignals?: string[]  // signals that contribute to the score

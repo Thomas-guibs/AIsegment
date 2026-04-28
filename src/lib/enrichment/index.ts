@@ -6,7 +6,9 @@ import {
   extractLanguages,
   extractSubsites,
   cleanDomain,
-  isEcommerceSite,
+  detectEcommerce,
+  guessDomain,
+  isEcommerceNaf,
 } from "./website"
 import { enrichWithPappers, fetchPappersCompany } from "./pappers"
 import { extractWithClaude } from "./claude"
@@ -148,46 +150,57 @@ export async function enrichCompanyWithDebug(
             // Try to find company website via Pappers company detail
             let companyDomain: string | null = null
             let ecommerce = false
+            let platform: string | null = null
+            let fit: "strong" | "partial" | "none" = "none"
             const icpSignals: string[] = []
 
             // Fetch company detail to get website/domain
             const companyDetail = await fetchPappersCompany(related.siren)
             if (companyDetail) {
-              // Check domain_activite / site_web fields
-              const siteWeb = companyDetail.site_web ?? companyDetail.domaine_activite ?? null
+              // site_web only — domaine_activite is the NAF description, not a URL
+              const siteWeb: string | null = companyDetail.site_web ?? null
               if (siteWeb) {
                 companyDomain = siteWeb.replace(/^https?:\/\//, "").replace(/\/$/, "").split("/")[0]
               }
 
-              // Check NAF code for retail/commerce
+              // NAF code → commerce signal
               const naf = companyDetail.code_naf ?? related.codeNaf
-              if (naf) {
-                const nafPrefix = naf.slice(0, 2)
-                if (["47", "46"].includes(nafPrefix)) icpSignals.push(`Commerce (NAF ${naf})`)
-                if (nafPrefix === "47") icpSignals.push("Commerce de detail")
+              if (naf && isEcommerceNaf(naf)) {
+                icpSignals.push(`Commerce (NAF ${naf})`)
+                if (naf.slice(0, 2) === "47") icpSignals.push("Commerce de detail")
               }
 
-              // Check forme juridique
+              // Forme juridique
               const forme = companyDetail.forme_juridique ?? related.formeJuridique
               if (forme && (forme.includes("SAS") || forme.includes("SARL"))) {
                 icpSignals.push(`Societe commerciale (${forme})`)
               }
             }
 
-            // Check ecommerce via website
+            // Fallback: if Pappers has no site_web, infer the domain from the company name
+            if (!companyDomain) {
+              companyDomain = await guessDomain(related.name)
+              if (companyDomain) icpSignals.push("Domaine inferé du nom")
+            }
+
+            // Check ecommerce platform on the resolved domain
             if (companyDomain) {
-              ecommerce = await isEcommerceSite(companyDomain)
-              if (ecommerce) icpSignals.push("Site ecommerce detecte")
+              const detection = await detectEcommerce(companyDomain)
+              ecommerce = detection.isEcommerce
+              platform = detection.platform
+              fit = detection.fit
+              if (ecommerce && platform) icpSignals.push(`Plateforme: ${platform}`)
               icpSignals.push(`Site: ${companyDomain}`)
             }
 
             // ICP Score calculation (0-100)
             let icpScore = 0
-            if (ecommerce) icpScore += 50            // Strong signal: confirmed ecommerce
-            if (companyDomain) icpScore += 10         // Has a website
-            if (icpSignals.some((s) => s.includes("Commerce"))) icpScore += 20 // Commerce NAF code
-            if (icpSignals.some((s) => s.includes("commerciale"))) icpScore += 10 // SAS/SARL
-            if (isClient) icpScore = 100              // Already a client = max
+            if (fit === "strong") icpScore += 60                                      // Shopify / PrestaShop
+            else if (fit === "partial") icpScore += 40                                // WooCommerce / generic
+            if (companyDomain) icpScore += 10                                         // Has a website
+            if (icpSignals.some((s) => s.includes("Commerce"))) icpScore += 20        // Commerce NAF
+            if (icpSignals.some((s) => s.includes("commerciale"))) icpScore += 10     // SAS/SARL
+            if (isClient) icpScore = 100                                              // Already a client
 
             return {
               name: related.name,
@@ -195,6 +208,9 @@ export async function enrichCompanyWithDebug(
               isClient,
               hubspotCompanyId,
               isEcommerce: ecommerce,
+              platform,
+              fit,
+              domain: companyDomain,
               role: related.role,
               icpScore,
               icpSignals,

@@ -438,24 +438,42 @@ function UpsellSignalsCard({ companyId, signals: initialSignals }: { companyId: 
                       <span className={cn("font-medium truncate max-w-[200px]", score >= 50 ? "text-text-primary" : "text-text-secondary")}>
                         {sib.name}
                       </span>
-                      {sib.isEcommerce && (
-                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0 rounded-full bg-positive/10 text-positive border border-positive/20 flex-shrink-0">
-                          <Store className="w-2.5 h-2.5" />Ecommerce
+                      {sib.isEcommerce && sib.platform && (
+                        <span className={cn(
+                          "inline-flex items-center gap-0.5 px-1.5 py-0 rounded-full border flex-shrink-0",
+                          sib.fit === "strong"
+                            ? "bg-positive/10 text-positive border-positive/20"
+                            : "bg-warning/10 text-warning border-warning/20"
+                        )}>
+                          <Store className="w-2.5 h-2.5" />{sib.platform}
                         </span>
                       )}
                       {sib.icpSignals && sib.icpSignals.length > 0 && (
                         <span className="text-text-muted truncate" title={sib.icpSignals.join(" | ")}>
-                          {sib.icpSignals.filter((s) => !s.startsWith("Site:")).slice(0, 1).join(" · ")}
+                          {sib.icpSignals.filter((s) => !s.startsWith("Site:") && !s.startsWith("Plateforme:")).slice(0, 1).join(" · ")}
                         </span>
                       )}
-                      <a
-                        href={`https://www.pappers.fr/entreprise/${sib.siren}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ml-auto text-text-muted hover:text-accent flex-shrink-0"
-                      >
-                        <ExternalLink className="w-2.5 h-2.5" />
-                      </a>
+                      <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                        {sib.domain && (
+                          <a
+                            href={`https://${sib.domain}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-text-muted hover:text-accent"
+                            title={sib.domain}
+                          >
+                            <Globe className="w-2.5 h-2.5" />
+                          </a>
+                        )}
+                        <a
+                          href={`https://www.pappers.fr/entreprise/${sib.siren}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-text-muted hover:text-accent"
+                        >
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      </div>
                     </div>
                   )
                 })}

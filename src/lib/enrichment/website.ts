@@ -45,41 +45,111 @@ function normalizeDomain(domain: string): string {
   return `https://${d}`
 }
 
-// Try to find the legal mentions page of a site
-// Fetches top candidates in parallel to minimize latency
+// Static candidates probed in parallel — fast path for predictable URLs
+const LEGAL_PATH_CANDIDATES = [
+  "/mentions-legales",
+  "/mentions-legales.php",        // legacy PHP sites (e.g. vitagermine.com)
+  "/mentions-legales.html",
+  "/mentions_legales",
+  "/mentionslegales",
+  "/legal",
+  "/legal.php",
+  "/mentions",
+  "/fr/mentions-legales",
+  "/policies/legal-notice",       // Shopify
+  "/policies/terms-of-service",   // Shopify
+  "/pages/mentions-legales",      // Shopify custom pages
+  "/cgv",
+  "/cgv.php",
+]
+
+// Anchor-href regex: match links pointing at a legal-ish page anywhere in HTML
+const LEGAL_LINK_RE = /<a\b[^>]*href\s*=\s*["']([^"'#]+)["'][^>]*>([^<]{1,80})<\/a>/gi
+const LEGAL_KEYWORDS_RE = /\b(mention|legal|cgv|cgu|impressum|policies\/legal)/i
+
+function looksLikeLegalContent(html: string): boolean {
+  const lower = html.toLowerCase()
+  return (
+    lower.includes("siren") ||
+    lower.includes("siret") ||
+    lower.includes("rcs") ||
+    lower.includes("tva") ||
+    lower.includes("mentions légales") ||
+    lower.includes("mentions legales") ||
+    lower.includes("capital social") ||
+    /capital\s+(?:de|social)?\s*[:\s]?\s*\d/i.test(lower)
+  )
+}
+
+// Discover legal-page links from the homepage (footer, header, anywhere)
+// Handles arbitrary URL shapes the static list can't cover (.php, hash routes, lang prefixes, etc.)
+function discoverLegalPathsFromHome(homeHtml: string, baseDomain: string): string[] {
+  const found = new Set<string>()
+  let m: RegExpExecArray | null
+  while ((m = LEGAL_LINK_RE.exec(homeHtml)) !== null) {
+    const href = m[1].trim()
+    const text = m[2].trim()
+    const probe = `${href} ${text}`
+    if (!LEGAL_KEYWORDS_RE.test(probe)) continue
+
+    // Resolve to a path relative to the domain
+    try {
+      const resolved = new URL(href, `https://${baseDomain}/`)
+      // Same-origin only
+      if (resolved.host !== baseDomain && resolved.host !== `www.${baseDomain}`) continue
+      found.add(resolved.pathname + (resolved.search || ""))
+    } catch {
+      // Relative path without leading slash
+      if (href.startsWith("http")) continue
+      found.add(href.startsWith("/") ? href : `/${href}`)
+    }
+  }
+  return Array.from(found)
+}
+
+// Try to find the legal mentions page of a site.
+// Strategy:
+//   1. Probe static candidates (parallel)
+//   2. Fetch homepage and discover legal-link hrefs (handles .php, custom routes...)
+//   3. Validate by looking for SIREN/SIRET/RCS/TVA/"capital" keywords in fetched HTML
 export async function findLegalPageAndContent(domain: string): Promise<{ url: string; html: string } | null> {
   const base = normalizeDomain(domain)
-  const candidates = [
-    "/mentions-legales",
-    "/legal",
-    "/mentions",
-    "/fr/mentions-legales",
-    "/policies/legal-notice",    // Shopify
-    "/policies/terms-of-service", // Shopify
-    "/pages/mentions-legales",   // Shopify pages
-    "/cgv",
-  ]
+  const cleanedHost = base.replace(/^https?:\/\//, "")
 
-  // Parallel fetch all candidates
-  const results = await Promise.all(
-    candidates.map(async (path) => {
-      const url = `${base}${path}`
-      const html = await fetchPage(url, 3000)
-      if (html) {
-        const lower = html.toLowerCase()
-        if (lower.includes("siren") || lower.includes("siret") ||
-            lower.includes("rcs") || lower.includes("tva") ||
-            lower.includes("mentions légales") || lower.includes("mentions legales") ||
-            lower.includes("capital social")) {
-          return { url, html }
-        }
-      }
-      return null
-    })
-  )
+  // Phase 1+2 in parallel: static candidates AND homepage fetch
+  const [staticResults, homeHtml] = await Promise.all([
+    Promise.all(
+      LEGAL_PATH_CANDIDATES.map(async (path) => {
+        const url = `${base}${path}`
+        const html = await fetchPage(url, 3000)
+        if (html && looksLikeLegalContent(html)) return { url, html }
+        return null
+      }),
+    ),
+    fetchPage(`${base}/`, 3000),
+  ])
 
-  const hit = results.find((r) => r !== null)
-  return hit ?? null
+  const staticHit = staticResults.find((r) => r !== null)
+  if (staticHit) return staticHit
+
+  // Phase 3: extract candidate paths from the homepage anchors
+  if (homeHtml) {
+    const dynamicPaths = discoverLegalPathsFromHome(homeHtml, cleanedHost)
+    if (dynamicPaths.length > 0) {
+      const dynamicResults = await Promise.all(
+        dynamicPaths.map(async (path) => {
+          const url = `${base}${path.startsWith("/") ? path : "/" + path}`
+          const html = await fetchPage(url, 3000)
+          if (html && looksLikeLegalContent(html)) return { url, html }
+          return null
+        }),
+      )
+      const dynamicHit = dynamicResults.find((r) => r !== null)
+      if (dynamicHit) return dynamicHit
+    }
+  }
+
+  return null
 }
 
 // Legacy compat wrapper
@@ -96,16 +166,19 @@ export function extractSiren(html: string): string | null {
 
   const sirenPatterns = [
     // Direct SIREN/SIRET
-    /siren\s*[:=]?\s*([\d\s]{9,17})/i,
-    /siret\s*[:=]?\s*([\d\s]{9,17})/i,
-    // RCS + city + number
-    /rcs\s+[a-zéèêëàâ\- ]{2,20}\s*([\d\s]{9,14})/i,
+    /siren\s*[:=]?\s*([\d\s.]{9,17})/i,
+    /siret\s*[:=]?\s*([\d\s.]{9,17})/i,
+    // RCS / R.C.S. / R.C / RC + city + optional greffe letter (A/B/C/D) + number
+    // e.g. "R.C BORDEAUX B 775 586 811" or "RCS Paris 123 456 789"
+    /r\.?c\.?s?\.?\s+[a-zéèêëàâïîôöûüç\-' ]{2,30}?\s+(?:[a-z]\s+)?([\d\s.]{9,17})/i,
+    // "Registre du Commerce" + city + number
+    /registre\s+du\s+commerce[^.]{0,40}?([\d\s.]{9,17})/i,
     // TVA intra-communautaire: FR + 2 digits + 9 digits (SIREN)
     /(?:tva|n°\s*tva)[^a-z0-9]*(?:intra[^a-z0-9]*(?:communautaire)?)?[^a-z0-9]*fr\s*(\d{2})\s*(\d{3})\s*(\d{3})\s*(\d{3})/i,
     // Standalone TVA pattern: FR followed by 11 digits
     /fr\s*(\d{11})/i,
     // Capital social section often has SIREN nearby
-    /(?:immatricul|enregistr)[^.]{0,60}([\d\s]{9,14})/i,
+    /(?:immatricul|enregistr)[^.]{0,60}([\d\s.]{9,14})/i,
   ]
 
   for (const pattern of sirenPatterns) {
@@ -114,21 +187,28 @@ export function extractSiren(html: string): string | null {
 
     // TVA intra format: groups are check(2) + 3×3 digits of SIREN
     if (match.length === 5) {
-      // Pattern with 4 groups: check + 3 groups of 3
       return `${match[2]}${match[3]}${match[4]}`
     }
 
     // FR + 11 digits: last 9 = SIREN
-    if (match[1] && match[1].length === 11) {
-      return match[1].slice(2) // Remove 2 check digits
+    if (match[1] && match[1].length === 11 && /^\d{11}$/.test(match[1])) {
+      return match[1].slice(2)
     }
 
-    // Standard patterns
-    const digits = match[1].replace(/\s/g, "")
+    const digits = match[1].replace(/[\s.]/g, "")
     if (digits.length >= 9) {
       return digits.slice(0, 9)
     }
   }
+
+  // Last-resort fallback: a standalone "XXX XXX XXX" formatted SIREN
+  // (3-3-3 grouping is highly specific to French SIREN — low false-positive risk
+  // since we're scanning legal pages only)
+  const standalone = text.match(/\b(\d{3}\s\d{3}\s\d{3})\b/)
+  if (standalone) {
+    return standalone[1].replace(/\s/g, "")
+  }
+
   return null
 }
 

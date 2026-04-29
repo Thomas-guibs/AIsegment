@@ -14,6 +14,7 @@ import {
   BarChart3,
   Activity,
   Coins,
+  Sparkles,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react"
@@ -21,6 +22,7 @@ import {
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Comptes", href: "/accounts", icon: Building2 },
+  { name: "Upsell Signals", href: "/upsell-signals", icon: Sparkles },
   { name: "Pipeline", href: "/pipeline", icon: GitBranch },
   { name: "NRR Detail", href: "/nrr", icon: Activity },
   { name: "Commissions", href: "/commissions", icon: Coins },

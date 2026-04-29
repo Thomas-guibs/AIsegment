@@ -28,7 +28,7 @@ export async function POST(
 
     const { signals, debug } = await enrichCompanyWithDebug(
       companyId, company.domain, company.name,
-      company.mrr, company.plan, domainMap
+      company.mrr, company.plan, domainMap, company.ownerId,
     )
 
     if (!signals) {

@@ -12,6 +12,7 @@ import {
 } from "./website"
 import { enrichWithPappers, fetchPappersCompany } from "./pappers"
 import { extractWithClaude, qualifyCompany } from "./claude"
+import { saveEnrichment, getEnrichment } from "./storage"
 import type { UpsellSignals } from "../types"
 import { buildUpsellSignals } from "../scoring/upsell"
 import { getCached, setCache } from "../cache"
@@ -43,7 +44,8 @@ export async function enrichCompanyWithDebug(
   companyName: string,
   mrr: number,
   plan: string | null,
-  allCustomerDomains: Map<string, { id: string; name: string }>
+  allCustomerDomains: Map<string, { id: string; name: string }>,
+  csmId?: string | null,
 ): Promise<{ signals: UpsellSignals | null; debug: EnrichmentDebug }> {
   const debug: EnrichmentDebug = {
     domain,
@@ -57,6 +59,14 @@ export async function enrichCompanyWithDebug(
     pappersError: null,
   }
 
+  // Check persistent KV first — costs $0.30 to recompute, never recompute
+  const stored = await getEnrichment(companyId).catch(() => null)
+  if (stored) {
+    console.log(`[enrich:${companyId}] hit KV cache enrichedAt=${stored.enrichedAt}`)
+    return { signals: stored.signals, debug }
+  }
+
+  // Then in-memory cache (10 min) — useful within a single warm function instance
   const cached = getCachedEnrichment(companyId)
   if (cached) return { signals: cached, debug }
 
@@ -342,6 +352,16 @@ export async function enrichCompanyWithDebug(
 
   setCachedEnrichment(companyId, signals)
 
+  // Persist to KV with parent metadata for the /upsell-signals view
+  await saveEnrichment({
+    companyId,
+    parentName: companyName,
+    parentMrr: mrr,
+    parentCsmId: csmId ?? null,
+    signals,
+    enrichedAt: new Date().toISOString(),
+  }).catch((e) => console.warn(`[enrich:${companyId}] KV save failed: ${String(e).slice(0, 200)}`))
+
   // Log each debug field separately (Vercel truncates long log messages)
   console.log(`[enrich:${companyId}] domain=${debug.domain}`)
   console.log(`[enrich:${companyId}] homepage=${debug.homepageFetched} legal=${debug.legalPageFetched} legalUrl=${debug.legalPageUrl}`)
@@ -359,8 +379,9 @@ export async function enrichCompany(
   companyName: string,
   mrr: number,
   plan: string | null,
-  allCustomerDomains: Map<string, { id: string; name: string }>
+  allCustomerDomains: Map<string, { id: string; name: string }>,
+  csmId?: string | null,
 ): Promise<UpsellSignals | null> {
-  const { signals } = await enrichCompanyWithDebug(companyId, domain, companyName, mrr, plan, allCustomerDomains)
+  const { signals } = await enrichCompanyWithDebug(companyId, domain, companyName, mrr, plan, allCustomerDomains, csmId)
   return signals
 }

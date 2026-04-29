@@ -11,8 +11,7 @@ import {
   getNafCommerceSignal,
 } from "./website"
 import { enrichWithPappers, fetchPappersCompany } from "./pappers"
-import { findDomainViaBrave } from "./brave"
-import { extractWithClaude } from "./claude"
+import { extractWithClaude, qualifyCompany } from "./claude"
 import type { UpsellSignals } from "../types"
 import { buildUpsellSignals } from "../scoring/upsell"
 import { getCached, setCache } from "../cache"
@@ -240,23 +239,52 @@ export async function enrichCompanyWithDebug(
                 }
               }
 
-              // Last resort: Brave Search (paid, ~2k req/mo free quota)
-              // Used when name inference fails — handles cases where the brand
-              // (e.g. "Musc Intime") differs from the legal name (e.g. "SEKAYA")
+              // Last resort: Claude AI with autonomous web search
+              // Claude finds the commercial brand name + website + qualifies the company
+              // Handles cases where the brand (e.g. "Musc Intime") differs from the
+              // legal name (e.g. "SEKAYA") — Claude searches the web and verifies.
               if (!companyDomain) {
-                const brave = await findDomainViaBrave(related.name, related.siren)
-                if (brave.domain) {
-                  companyDomain = brave.domain
-                  domainValidated = true   // SIREN was in the query → high confidence
-                  icpSignals.push(`Domaine via Brave Search: ${brave.domain}`)
+                const qualification = await qualifyCompany({
+                  denomination: related.name,
+                  siren: related.siren,
+                  codeNaf: naf ?? undefined,
+                  libelleNaf: companyDetail?.libelle_code_naf ?? undefined,
+                  objetSocial: companyDetail?.objet_social ?? undefined,
+                  formeJuridique: forme ?? undefined,
+                })
+
+                if (qualification.domain) {
+                  companyDomain = qualification.domain
+                  domainValidated = true   // Claude verified via web search
+                  icpSignals.push(`Domaine (Claude): ${qualification.domain}`)
+                }
+                if (qualification.commercialName) {
+                  icpSignals.push(`Marque: ${qualification.commercialName}`)
+                }
+                if (qualification.isEcommerce) {
+                  ecommerce = true
+                  if (qualification.reasoning) {
+                    icpSignals.push(`E-commerce (Claude): ${qualification.reasoning}`)
+                  }
+                }
+                if (qualification.platform) {
+                  platform = qualification.platform
+                  fit = ["Shopify", "PrestaShop"].includes(qualification.platform)
+                    ? "strong"
+                    : "partial"
+                  icpSignals.push(`Plateforme (Claude): ${qualification.platform}`)
+                }
+                if (qualification.icpScore > 0) {
+                  icpSignals.push(`Score Claude: ${qualification.icpScore}/100`)
                 }
               }
             }
 
             console.log(`[domain:${related.siren}] RESULT domain=${companyDomain ?? "null"} validated=${domainValidated}`)
 
-            // Check ecommerce platform on the resolved domain
-            if (companyDomain) {
+            // Run HTTP-based ecommerce detection only if we don't already know
+            // (Claude qualification already verified ecommerce status via web search)
+            if (companyDomain && !ecommerce) {
               const detection = await detectEcommerce(companyDomain)
               ecommerce = detection.isEcommerce
               platform = detection.platform

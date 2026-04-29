@@ -40,7 +40,7 @@ interface EmptyEnrichment {
 }
 
 interface UpsellSignalsData {
-  kvConfigured: boolean
+  dbConfigured: boolean
   kpis: {
     totalSignals: number
     hot: number
@@ -148,16 +148,22 @@ function UpsellSignalsContent() {
 
   return (
     <div className="p-6 space-y-6">
-      {!data.kvConfigured && (
+      {!data.dbConfigured && (
         <div className="card border-warning/40 bg-warning/10">
           <div className="flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-warning flex-shrink-0 mt-0.5" />
             <div className="text-[13px] text-text-primary">
-              <div className="font-semibold mb-1">Vercel KV n'est pas configuré</div>
-              <div className="text-text-secondary">
-                Le bouton d'enrichissement est désactivé tant que la base de données n'est pas branchée.
-                Setup : Vercel Dashboard → Storage → Create Database → <span className="font-mono">Upstash for Redis</span> (free tier).
-                Vercel injectera <span className="font-mono">KV_REST_API_URL</span> et <span className="font-mono">KV_REST_API_TOKEN</span> automatiquement, puis redeploy.
+              <div className="font-semibold mb-1">Supabase n'est pas configuré</div>
+              <div className="text-text-secondary space-y-1">
+                <div>
+                  Le bouton d'enrichissement est désactivé tant que la base de données n'est pas branchée.
+                </div>
+                <div>
+                  1. Vérifie que <span className="font-mono">SUPABASE_URL</span> et <span className="font-mono">SUPABASE_SERVICE_ROLE_KEY</span> sont injectés (Vercel le fait automatiquement quand Supabase est connecté via Storage).
+                </div>
+                <div>
+                  2. Crée la table <span className="font-mono">upsell_enrichments</span> dans le SQL editor Supabase (DDL dans <span className="font-mono">src/lib/enrichment/storage.ts</span>).
+                </div>
               </div>
             </div>
           </div>
@@ -232,12 +238,12 @@ function UpsellSignalsContent() {
 
             <button
               onClick={handleEnrichNext}
-              disabled={enriching || kpis.pendingCompanies === 0 || !data.kvConfigured}
+              disabled={enriching || kpis.pendingCompanies === 0 || !data.dbConfigured}
               className={cn(
                 "flex items-center gap-2 px-4 py-2 rounded-md text-[13px] font-medium transition-colors",
                 enriching
                   ? "bg-card-hover text-text-muted cursor-wait"
-                  : kpis.pendingCompanies === 0 || !data.kvConfigured
+                  : kpis.pendingCompanies === 0 || !data.dbConfigured
                   ? "bg-card-hover text-text-muted cursor-not-allowed"
                   : "bg-accent text-white hover:bg-accent/90"
               )}

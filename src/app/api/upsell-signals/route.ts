@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic"
 
 import { NextRequest, NextResponse } from "next/server"
-import { listEnrichments, kvConfigured } from "@/lib/enrichment/storage"
+import { listEnrichments, dbConfigured } from "@/lib/enrichment/storage"
 import { fetchCustomerCompanies } from "@/lib/hubspot/companies"
 import { getCsmName, CSM_TEAM_IDS } from "@/lib/constants"
 
@@ -146,7 +146,7 @@ export async function GET(request: NextRequest) {
     const enrichedCompanies = scopedEnrichments.length
 
     return NextResponse.json({
-      kvConfigured: kvConfigured(),
+      dbConfigured: dbConfigured(),
       kpis: {
         totalSignals,
         hot,

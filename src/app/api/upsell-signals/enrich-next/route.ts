@@ -4,16 +4,16 @@ export const maxDuration = 60
 import { NextRequest, NextResponse } from "next/server"
 import { fetchCustomerCompanies } from "@/lib/hubspot/companies"
 import { enrichCompanyWithDebug } from "@/lib/enrichment"
-import { listEnrichmentIds, kvConfigured } from "@/lib/enrichment/storage"
+import { listEnrichmentIds, dbConfigured } from "@/lib/enrichment/storage"
 
 export async function POST(request: NextRequest) {
   try {
-    // Refuse to enrich if KV is not configured — otherwise we'd silently
+    // Refuse to enrich if Supabase is not configured — otherwise we'd silently
     // re-enrich the same highest-MRR company on every click ($0.30 each).
-    if (!kvConfigured()) {
+    if (!dbConfigured()) {
       return NextResponse.json({
-        error: "Vercel KV not configured",
-        details: "Set up Upstash for Redis from Vercel Storage to enable persistent enrichment. Without KV the same company would be re-enriched on every click.",
+        error: "Supabase not configured",
+        details: "Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (auto-injected when Supabase is connected via Vercel Storage), and create the `upsell_enrichments` table.",
       }, { status: 503 })
     }
 

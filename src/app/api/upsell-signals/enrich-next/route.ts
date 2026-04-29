@@ -4,10 +4,19 @@ export const maxDuration = 60
 import { NextRequest, NextResponse } from "next/server"
 import { fetchCustomerCompanies } from "@/lib/hubspot/companies"
 import { enrichCompanyWithDebug } from "@/lib/enrichment"
-import { listEnrichmentIds } from "@/lib/enrichment/storage"
+import { listEnrichmentIds, kvConfigured } from "@/lib/enrichment/storage"
 
 export async function POST(request: NextRequest) {
   try {
+    // Refuse to enrich if KV is not configured — otherwise we'd silently
+    // re-enrich the same highest-MRR company on every click ($0.30 each).
+    if (!kvConfigured()) {
+      return NextResponse.json({
+        error: "Vercel KV not configured",
+        details: "Set up Upstash for Redis from Vercel Storage to enable persistent enrichment. Without KV the same company would be re-enriched on every click.",
+      }, { status: 503 })
+    }
+
     const body = await request.json().catch(() => ({}))
     const csmId: string | null = typeof body.csmId === "string" && body.csmId.length > 0 ? body.csmId : null
 

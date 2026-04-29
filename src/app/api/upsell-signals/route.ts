@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic"
 
 import { NextRequest, NextResponse } from "next/server"
-import { listEnrichments } from "@/lib/enrichment/storage"
+import { listEnrichments, kvConfigured } from "@/lib/enrichment/storage"
 import { fetchCustomerCompanies } from "@/lib/hubspot/companies"
 import { getCsmName, CSM_TEAM_IDS } from "@/lib/constants"
 
@@ -25,6 +25,18 @@ interface FlattenedSignal {
   role: string | null
 }
 
+interface EmptyEnrichment {
+  parentCompanyId: string
+  parentName: string
+  parentMrr: number
+  parentCsmName: string | null
+  enrichedAt: string
+  totalSiblings: number
+  excludedCount: number
+  clientCount: number
+  reason: string
+}
+
 export async function GET(request: NextRequest) {
   try {
     const sp = request.nextUrl.searchParams
@@ -43,11 +55,12 @@ export async function GET(request: NextRequest) {
       ? stored.filter((e) => e.parentCsmId === csmId)
       : stored
 
-    // Flatten sibling brands across all enrichments (skip excluded)
+    // Flatten sibling brands across all enrichments (skip excluded + skip already-clients)
     let signals: FlattenedSignal[] = []
     for (const enr of scopedEnrichments) {
       for (const sib of enr.signals.siblingBrands) {
         if (sib.excluded) continue
+        if (sib.isClient) continue  // already a client → no upsell opportunity
         signals.push({
           parentCompanyId: enr.companyId,
           parentName: enr.parentName,
@@ -80,9 +93,9 @@ export async function GET(request: NextRequest) {
       return b.parentMrr - a.parentMrr
     })
 
-    // KPIs (computed BEFORE the user filters so the cards show portfolio totals)
+    // KPIs (computed on the full scope, before user filters)
     const allSignalsForKpis = scopedEnrichments
-      .flatMap((e) => e.signals.siblingBrands.filter((s) => !s.excluded))
+      .flatMap((e) => e.signals.siblingBrands.filter((s) => !s.excluded && !s.isClient))
 
     const totalSignals = allSignalsForKpis.length
     const hot = allSignalsForKpis.filter((s) => (s.icpScore ?? 0) >= 70).length
@@ -93,6 +106,37 @@ export async function GET(request: NextRequest) {
     const cold = allSignalsForKpis.filter((s) => (s.icpScore ?? 0) < 40).length
     const ecommerceConfirmed = allSignalsForKpis.filter((s) => s.isEcommerce).length
 
+    // Enriched companies that produced no actionable signal
+    // (so the user knows the company WAS processed and shouldn't be re-enriched)
+    const enrichedWithoutSignals: EmptyEnrichment[] = []
+    for (const enr of scopedEnrichments) {
+      const sibs = enr.signals.siblingBrands
+      const total = sibs.length
+      const excludedCount = sibs.filter((s) => s.excluded).length
+      const clientCount = sibs.filter((s) => s.isClient && !s.excluded).length
+      const relevantCount = sibs.filter((s) => !s.excluded && !s.isClient).length
+      if (relevantCount > 0) continue
+
+      let reason: string
+      if (total === 0) reason = "Aucune entreprise liée détectée par Pappers"
+      else if (excludedCount === total) reason = `${excludedCount} entreprise(s) liée(s) exclue(s) (holding/SCI/immobilier)`
+      else if (clientCount === total - excludedCount) reason = `${clientCount} entreprise(s) liée(s) déjà cliente(s) Loyoly`
+      else reason = `${excludedCount} exclue(s) + ${clientCount} déjà cliente(s)`
+
+      enrichedWithoutSignals.push({
+        parentCompanyId: enr.companyId,
+        parentName: enr.parentName,
+        parentMrr: enr.parentMrr,
+        parentCsmName: enr.parentCsmId ? getCsmName(enr.parentCsmId) : null,
+        enrichedAt: enr.enrichedAt,
+        totalSiblings: total,
+        excludedCount,
+        clientCount,
+        reason,
+      })
+    }
+    enrichedWithoutSignals.sort((a, b) => b.parentMrr - a.parentMrr)
+
     // Pending count: customers in scope that haven't been enriched yet
     const enrichedIds = new Set(stored.map((s) => s.companyId))
     const scopedCustomers = csmId
@@ -102,6 +146,7 @@ export async function GET(request: NextRequest) {
     const enrichedCompanies = scopedEnrichments.length
 
     return NextResponse.json({
+      kvConfigured: kvConfigured(),
       kpis: {
         totalSignals,
         hot,
@@ -112,6 +157,7 @@ export async function GET(request: NextRequest) {
         pendingCompanies,
       },
       signals: signals.slice(0, 200),
+      enrichedWithoutSignals,
       availableCsms: CSM_TEAM_IDS,
     })
   } catch (error) {

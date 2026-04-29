@@ -6,7 +6,7 @@ import { Header } from "@/components/layout/Header"
 import { useFetch } from "@/lib/hooks"
 import { cn, formatCurrency } from "@/lib/utils"
 import { CSM_TEAM } from "@/lib/constants"
-import { Sparkles, Flame, ExternalLink, Users, ShoppingCart, Loader2, CheckCircle2 } from "lucide-react"
+import { Sparkles, Flame, ExternalLink, Users, ShoppingCart, Loader2, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react"
 
 interface UpsellSignal {
   parentCompanyId: string
@@ -27,7 +27,20 @@ interface UpsellSignal {
   role: string | null
 }
 
+interface EmptyEnrichment {
+  parentCompanyId: string
+  parentName: string
+  parentMrr: number
+  parentCsmName: string | null
+  enrichedAt: string
+  totalSiblings: number
+  excludedCount: number
+  clientCount: number
+  reason: string
+}
+
 interface UpsellSignalsData {
+  kvConfigured: boolean
   kpis: {
     totalSignals: number
     hot: number
@@ -38,6 +51,7 @@ interface UpsellSignalsData {
     pendingCompanies: number
   }
   signals: UpsellSignal[]
+  enrichedWithoutSignals: EmptyEnrichment[]
 }
 
 function scoreColor(score: number, isClient: boolean): string {
@@ -73,7 +87,8 @@ function UpsellSignalsContent() {
   const [minScore, setMinScore] = useState<number>(0)
   const [ecommerceOnly, setEcommerceOnly] = useState(false)
   const [enriching, setEnriching] = useState(false)
-  const [lastEnrich, setLastEnrich] = useState<string | null>(null)
+  const [lastEnrich, setLastEnrich] = useState<{ kind: "info" | "error"; text: string } | null>(null)
+  const [showEmpty, setShowEmpty] = useState(false)
 
   const params: Record<string, string> = {}
   if (csmId) params.csmId = csmId
@@ -91,17 +106,23 @@ function UpsellSignalsContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ csmId: csmId || undefined }),
       })
-      const json = await res.json()
-      if (json.done) {
-        setLastEnrich(json.message ?? "Tous les comptes sont enrichis")
-      } else if (json.error) {
-        setLastEnrich(`Erreur : ${json.error}`)
+      let json: { done?: boolean; error?: string; details?: string; name?: string; signalsCount?: number; hotCount?: number; message?: string }
+      try {
+        json = await res.json()
+      } catch {
+        setLastEnrich({ kind: "error", text: `HTTP ${res.status} : réponse invalide (probablement un timeout Vercel >60s)` })
+        return
+      }
+      if (!res.ok || json.error) {
+        setLastEnrich({ kind: "error", text: `Erreur ${res.status} : ${json.error ?? "inconnue"}${json.details ? ` — ${json.details}` : ""}` })
+      } else if (json.done) {
+        setLastEnrich({ kind: "info", text: json.message ?? "Tous les comptes sont enrichis" })
       } else {
-        setLastEnrich(`${json.name} enrichi : ${json.signalsCount} signaux dont ${json.hotCount} hot`)
+        setLastEnrich({ kind: "info", text: `${json.name} enrichi : ${json.signalsCount} signaux dont ${json.hotCount} hot` })
       }
       refetch()
     } catch (e) {
-      setLastEnrich(`Erreur : ${String(e).slice(0, 100)}`)
+      setLastEnrich({ kind: "error", text: `Erreur réseau : ${String(e).slice(0, 200)}` })
     } finally {
       setEnriching(false)
     }
@@ -127,6 +148,22 @@ function UpsellSignalsContent() {
 
   return (
     <div className="p-6 space-y-6">
+      {!data.kvConfigured && (
+        <div className="card border-warning/40 bg-warning/10">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-warning flex-shrink-0 mt-0.5" />
+            <div className="text-[13px] text-text-primary">
+              <div className="font-semibold mb-1">Vercel KV n'est pas configuré</div>
+              <div className="text-text-secondary">
+                Le bouton d'enrichissement est désactivé tant que la base de données n'est pas branchée.
+                Setup : Vercel Dashboard → Storage → Create Database → <span className="font-mono">Upstash for Redis</span> (free tier).
+                Vercel injectera <span className="font-mono">KV_REST_API_URL</span> et <span className="font-mono">KV_REST_API_TOKEN</span> automatiquement, puis redeploy.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="card">
@@ -195,12 +232,12 @@ function UpsellSignalsContent() {
 
             <button
               onClick={handleEnrichNext}
-              disabled={enriching || kpis.pendingCompanies === 0}
+              disabled={enriching || kpis.pendingCompanies === 0 || !data.kvConfigured}
               className={cn(
                 "flex items-center gap-2 px-4 py-2 rounded-md text-[13px] font-medium transition-colors",
                 enriching
                   ? "bg-card-hover text-text-muted cursor-wait"
-                  : kpis.pendingCompanies === 0
+                  : kpis.pendingCompanies === 0 || !data.kvConfigured
                   ? "bg-card-hover text-text-muted cursor-not-allowed"
                   : "bg-accent text-white hover:bg-accent/90"
               )}
@@ -226,8 +263,13 @@ function UpsellSignalsContent() {
         </div>
 
         {lastEnrich && (
-          <div className="mt-3 px-3 py-2 rounded-md bg-card-hover text-2xs text-text-secondary">
-            {lastEnrich}
+          <div className={cn(
+            "mt-3 px-3 py-2 rounded-md text-2xs",
+            lastEnrich.kind === "error"
+              ? "bg-negative/15 text-negative border border-negative/30"
+              : "bg-card-hover text-text-secondary"
+          )}>
+            {lastEnrich.text}
           </div>
         )}
       </div>
@@ -261,7 +303,7 @@ function UpsellSignalsContent() {
         </span>
       </div>
 
-      {/* Table */}
+      {/* Main signals table */}
       <div className="card p-0 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -342,6 +384,76 @@ function UpsellSignalsContent() {
           </table>
         </div>
       </div>
+
+      {/* Enriched companies that produced no actionable signal */}
+      {data.enrichedWithoutSignals.length > 0 && (
+        <div className="card p-0 overflow-hidden">
+          <button
+            onClick={() => setShowEmpty(!showEmpty)}
+            className="w-full px-4 py-3 flex items-center justify-between hover:bg-card-hover transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] font-medium text-text-primary">
+                Comptes enrichis sans signal pertinent
+              </span>
+              <span className="text-2xs text-text-muted bg-card-hover px-2 py-0.5 rounded-full">
+                {data.enrichedWithoutSignals.length}
+              </span>
+            </div>
+            {showEmpty ? (
+              <ChevronUp className="w-4 h-4 text-text-muted" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-text-muted" />
+            )}
+          </button>
+          {showEmpty && (
+            <div className="border-t border-card-border">
+              <div className="px-4 py-2 text-2xs text-text-muted bg-row-alt">
+                Ces comptes ont été enrichis mais n'ont produit aucune opportunité d'upsell exploitable
+                (entreprises liées toutes exclues, déjà clientes, ou aucune entreprise liée détectée).
+                Ils ne seront pas re-enrichis.
+              </div>
+              <table className="w-full">
+                <thead className="bg-row-alt">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-2xs text-text-muted">Compte</th>
+                    <th className="px-4 py-2 text-left text-2xs text-text-muted">MRR</th>
+                    <th className="px-4 py-2 text-left text-2xs text-text-muted">CSM</th>
+                    <th className="px-4 py-2 text-left text-2xs text-text-muted">Raison</th>
+                    <th className="px-4 py-2 text-left text-2xs text-text-muted">Enrichi le</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-card-border">
+                  {data.enrichedWithoutSignals.map((e) => (
+                    <tr key={e.parentCompanyId} className="hover:bg-card-hover transition-colors">
+                      <td className="px-4 py-2.5 text-[13px]">
+                        <Link
+                          href={`/account/${e.parentCompanyId}`}
+                          className="text-text-primary hover:text-accent"
+                        >
+                          {e.parentName}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-2.5 text-[13px] font-mono text-text-secondary">
+                        {formatCurrency(e.parentMrr, true)}
+                      </td>
+                      <td className="px-4 py-2.5 text-[13px] text-text-secondary">
+                        {e.parentCsmName ?? "—"}
+                      </td>
+                      <td className="px-4 py-2.5 text-2xs text-text-muted">
+                        {e.reason}
+                      </td>
+                      <td className="px-4 py-2.5 text-2xs text-text-muted font-mono">
+                        {new Date(e.enrichedAt).toLocaleDateString("fr-FR")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

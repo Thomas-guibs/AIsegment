@@ -22,6 +22,10 @@ function isKvConfigured(): boolean {
   return !!process.env.KV_REST_API_URL && !!process.env.KV_REST_API_TOKEN
 }
 
+export function kvConfigured(): boolean {
+  return isKvConfigured()
+}
+
 // Save an enrichment record + add to the sorted index
 export async function saveEnrichment(record: StoredEnrichment): Promise<void> {
   if (!isKvConfigured()) {

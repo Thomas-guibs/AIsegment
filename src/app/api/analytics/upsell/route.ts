@@ -80,13 +80,15 @@ export async function GET(request: NextRequest) {
     const monthBuckets = buildMonthBuckets(months)
     const quarterBuckets = buildQuarterBuckets(Math.ceil(months / 3))
 
-    // === 1. Upsell par mois / CSM (won) ===
+    // Toutes les transactions Upsell ayant une operationDate (date_de_prise_en_compte).
+    // C'est la date d'effet réel de l'upsell — on ignore closeDate / createdAt en bucketing.
+    const upsellByOpDate = enriched.filter((d) => !!d.operationDate)
+
+    // === 1. Upsell par mois / CSM ===
     const monthCsm: Record<string, Record<string, number>> = {}
     for (const b of monthBuckets) monthCsm[b.key] = {}
-    for (const d of enriched) {
-      const dt = d.closeDate ?? d.operationDate
-      if (!dt) continue
-      const k = dt.slice(0, 7)
+    for (const d of upsellByOpDate) {
+      const k = d.operationDate!.slice(0, 7)
       if (!monthCsm[k]) continue
       const csm = csmShort(d.ownerId)
       monthCsm[k][csm] = (monthCsm[k][csm] ?? 0) + d.amount
@@ -99,11 +101,8 @@ export async function GET(request: NextRequest) {
     // === 2. Upsell par trimestre ===
     const quarterTotal: Record<string, number> = {}
     for (const b of quarterBuckets) quarterTotal[b.key] = 0
-    for (const d of enriched) {
-      const dt = d.closeDate ?? d.operationDate
-      if (!dt) continue
-      const dateObj = new Date(dt)
-      const k = quarterKey(dateObj)
+    for (const d of upsellByOpDate) {
+      const k = quarterKey(new Date(d.operationDate!))
       if (k in quarterTotal) quarterTotal[k] += d.amount
     }
     const byQuarter = quarterBuckets.map((b) => ({
@@ -119,22 +118,21 @@ export async function GET(request: NextRequest) {
 
     // === 4. Panier moyen ===
     const avgByMonth = monthBuckets.map((b) => {
-      const dealsOfMonth = enriched.filter((d) => {
-        const dt = d.closeDate ?? d.operationDate
-        return dt?.slice(0, 7) === b.key
+      const dealsOfMonth = upsellByOpDate.filter((d) => {
+        return d.operationDate!.slice(0, 7) === b.key
       })
       const avg = dealsOfMonth.length > 0
         ? dealsOfMonth.reduce((s, d) => s + d.amount, 0) / dealsOfMonth.length
         : 0
       return { monthLabel: b.label, Moyenne: Math.round(avg) }
     })
-    const overallAvg = enriched.length > 0
-      ? Math.round(enriched.reduce((s, d) => s + d.amount, 0) / enriched.length)
+    const overallAvg = upsellByOpDate.length > 0
+      ? Math.round(upsellByOpDate.reduce((s, d) => s + d.amount, 0) / upsellByOpDate.length)
       : 0
 
     // === 5. Tier breakdown ===
     const tierAgg: Record<string, { amount: number; count: number }> = {}
-    for (const d of enriched) {
+    for (const d of upsellByOpDate) {
       const tier = (d.companyId && companyTier.get(d.companyId)) || TIER_FALLBACK
       if (!tierAgg[tier]) tierAgg[tier] = { amount: 0, count: 0 }
       tierAgg[tier].amount += d.amount

@@ -45,6 +45,7 @@ function transformDeal(raw: HubSpotDeal): Deal {
     renewalDate: parseDate(raw.properties.renewall_date),
     renewalStrategy: raw.properties.renewall_strategy ?? null,
     operationDate: parseDate(raw.properties.date_de_prise_en_compte),
+    paymentDate: parseDate(raw.properties.date_de_paiement),
     closeDate: parseDate(raw.properties.closedate),
     stage: raw.properties.dealstage ?? "",
     pipeline: raw.properties.pipeline ?? "",

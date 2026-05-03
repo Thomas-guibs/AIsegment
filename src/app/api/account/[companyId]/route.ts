@@ -66,6 +66,7 @@ export async function GET(
           renewalDate: parseDate(r.properties.renewall_date),
           renewalStrategy: r.properties.renewall_strategy ?? null,
           operationDate: parseDate(r.properties.date_de_prise_en_compte),
+          paymentDate: parseDate(r.properties.date_de_paiement),
           closeDate: parseDate(r.properties.closedate),
           stage: r.properties.dealstage ?? "",
           pipeline: r.properties.pipeline ?? "",

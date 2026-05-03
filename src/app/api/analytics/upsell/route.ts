@@ -2,10 +2,9 @@ export const dynamic = "force-dynamic"
 
 import { NextRequest, NextResponse } from "next/server"
 import { fetchAttributionDeals, enrichDealsWithCompanies } from "@/lib/hubspot/deals"
-import { fetchCustomerCompanies } from "@/lib/hubspot/companies"
 import { ATTRIBUTION, SALES_STAGES, SALES_STAGE_LABELS, CSM_TEAM, CHART_CSMS } from "@/lib/constants"
 import { format, startOfMonth, subMonths, getQuarter, startOfQuarter } from "date-fns"
-import type { Deal, Company } from "@/lib/types"
+import type { Deal } from "@/lib/types"
 
 const TIER_FALLBACK = "Non défini"
 const OPEN_STAGE_IDS = [
@@ -27,6 +26,11 @@ function csmShort(id: string | null): string {
   if (!id) return "Inconnu"
   const m = CSM_TEAM.find((c) => c.id === id)
   return m?.name.split(" ")[0] ?? "Inconnu"
+}
+
+function csmFull(id: string | null): string {
+  if (!id) return "Inconnu"
+  return CSM_TEAM.find((c) => c.id === id)?.name ?? "Inconnu"
 }
 
 function buildMonthBuckets(months: number) {
@@ -58,11 +62,7 @@ export async function GET(request: NextRequest) {
     const dateFrom = format(startOfMonth(subMonths(new Date(), months - 1)), "yyyy-MM-dd")
     const dateTo = format(new Date(), "yyyy-MM-dd")
 
-    // Fetch upsell deals (won, by closeDate) and all upsell deals (created window, server-side)
-    const [wonDeals, allCompaniesArr] = await Promise.all([
-      fetchAttributionDeals([ATTRIBUTION.UPSELL], dateFrom, dateTo, csmId),
-      fetchCustomerCompanies(),
-    ])
+    const wonDeals = await fetchAttributionDeals([ATTRIBUTION.UPSELL], dateFrom, dateTo, csmId)
     const enriched = await enrichDealsWithCompanies(wonDeals)
 
     // For "open pipeline" + "created opportunities", fetch all upsell deals regardless of operationDate.
@@ -70,11 +70,6 @@ export async function GET(request: NextRequest) {
     const wideFrom = format(startOfMonth(subMonths(new Date(), 24)), "yyyy-MM-dd")
     const allUpsellDeals = await fetchAttributionDeals([ATTRIBUTION.UPSELL], wideFrom, dateTo, csmId)
 
-    // Map company → tier
-    const companyTier = new Map<string, string>()
-    for (const c of allCompaniesArr as Company[]) {
-      companyTier.set(c.id, c.revenueTier ?? TIER_FALLBACK)
-    }
 
     // Buckets
     const monthBuckets = buildMonthBuckets(months)
@@ -130,10 +125,10 @@ export async function GET(request: NextRequest) {
       ? Math.round(upsellByOpDate.reduce((s, d) => s + d.amount, 0) / upsellByOpDate.length)
       : 0
 
-    // === 5. Tier breakdown ===
+    // === 5. Tier breakdown (via deal→company association) ===
     const tierAgg: Record<string, { amount: number; count: number }> = {}
     for (const d of upsellByOpDate) {
-      const tier = (d.companyId && companyTier.get(d.companyId)) || TIER_FALLBACK
+      const tier = d.companyRevenueTier || TIER_FALLBACK
       if (!tierAgg[tier]) tierAgg[tier] = { amount: 0, count: 0 }
       tierAgg[tier].amount += d.amount
       tierAgg[tier].count += 1
@@ -186,6 +181,20 @@ export async function GET(request: NextRequest) {
       ...createdByMonthCsm[b.key],
     }))
 
+    // === 9. Flat deals list for the Liste tab ===
+    const dealsList = enriched
+      .sort((a, b) => (b.operationDate ?? "").localeCompare(a.operationDate ?? ""))
+      .map((d) => ({
+        id: d.id,
+        name: d.name,
+        companyName: d.companyName ?? "—",
+        csmId: d.ownerId,
+        csmName: csmFull(d.ownerId),
+        amount: d.amount,
+        operationDate: d.operationDate,
+        paymentDate: d.paymentDate,
+      }))
+
     return NextResponse.json({
       byMonthCsm,
       byQuarter,
@@ -196,6 +205,7 @@ export async function GET(request: NextRequest) {
       conversionRate,
       pipelineByStage,
       createdByMonth,
+      dealsList,
       csms: CHART_CSMS,
     })
   } catch (error) {

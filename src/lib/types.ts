@@ -91,6 +91,7 @@ export interface Deal {
   renewalDate: string | null
   renewalStrategy: string | null
   operationDate: string | null
+  paymentDate: string | null
   closeDate: string | null
   stage: string
   pipeline: string
@@ -99,6 +100,7 @@ export interface Deal {
   lastModified: string | null
   companyId?: string
   companyName?: string
+  companyRevenueTier?: string
 }
 
 export interface Company {

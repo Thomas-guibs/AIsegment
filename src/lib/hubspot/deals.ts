@@ -17,6 +17,7 @@ function transformDeal(raw: HubSpotDeal): Deal {
     renewalDate: parseDate(raw.properties.renewall_date),
     renewalStrategy: raw.properties.renewall_strategy ?? null,
     operationDate: parseDate(raw.properties.date_de_prise_en_compte),
+    paymentDate: parseDate(raw.properties.date_de_paiement),
     closeDate: parseDate(raw.properties.closedate),
     stage: raw.properties.dealstage ?? "",
     pipeline: raw.properties.pipeline ?? "",
@@ -194,18 +195,22 @@ export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
 
       if (companyIds.size > 0) {
         const companiesResponse = await hubspotFetch<{
-          results: Array<{ id: string; properties: { name: string } }>
+          results: Array<{ id: string; properties: { name: string; client_revenue_tiers?: string } }>
         }>("/crm/v3/objects/companies/batch/read", {
           method: "POST",
           body: {
             inputs: Array.from(companyIds).map((id) => ({ id })),
-            properties: ["name"],
+            properties: ["name", "client_revenue_tiers"],
           },
         })
 
         const companyNames = new Map<string, string>()
+        const companyTiers = new Map<string, string>()
         for (const company of companiesResponse.results) {
           companyNames.set(company.id, company.properties.name)
+          if (company.properties.client_revenue_tiers) {
+            companyTiers.set(company.id, company.properties.client_revenue_tiers)
+          }
         }
 
         for (const deal of deals) {
@@ -213,6 +218,7 @@ export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
           if (companyId) {
             deal.companyId = companyId
             deal.companyName = companyNames.get(companyId) ?? undefined
+            deal.companyRevenueTier = companyTiers.get(companyId) ?? undefined
           }
         }
       }

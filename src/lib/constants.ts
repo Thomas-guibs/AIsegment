@@ -290,6 +290,7 @@ export const COMPANY_PROPERTIES = [
   "domain",
   "total_revenue",
   "plan",
+  "client_revenue_tiers",
   "hubspot_owner_id",
   "proprietaire_de_l_entreprise__csm_",
   "lifecyclestage",

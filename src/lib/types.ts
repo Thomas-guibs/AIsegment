@@ -37,6 +37,7 @@ export interface HubSpotCompany {
     domain: string | null
     total_revenue: string | null
     plan: string | null
+    client_revenue_tiers: string | null
     hubspot_owner_id: string | null
     proprietaire_de_l_entreprise__csm_: string | null
     lifecyclestage: string | null
@@ -104,6 +105,7 @@ export interface Company {
   domain: string | null
   mrr: number // total_revenue from HubSpot ("Chiffre d'affaire total")
   plan: string | null
+  revenueTier: string | null // client_revenue_tiers (custom HubSpot property)
   ownerId: string | null
   lifecycleStage: string | null
   customerStage: string | null // phase_du_client

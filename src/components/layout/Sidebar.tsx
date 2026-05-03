@@ -11,6 +11,7 @@ import {
   GitBranch,
   Users,
   TrendingUp,
+  TrendingDown,
   BarChart3,
   Activity,
   Coins,
@@ -19,17 +20,47 @@ import {
   ChevronRight,
 } from "lucide-react"
 
-const navigation = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { name: "Comptes", href: "/accounts", icon: Building2 },
-  { name: "Upsell Signals", href: "/upsell-signals", icon: Sparkles },
-  { name: "Pipeline", href: "/pipeline", icon: GitBranch },
-  { name: "NRR Detail", href: "/nrr", icon: Activity },
-  { name: "Commissions", href: "/commissions", icon: Coins },
-  { name: "Forecast", href: "/forecast", icon: BarChart3 },
-  { name: "Renouvellements", href: "/renewals", icon: CalendarClock },
-  { name: "Portefeuille", href: "/portfolio", icon: Users },
-  { name: "Tendances", href: "/trends", icon: TrendingUp },
+interface NavItem {
+  name: string
+  href: string
+  icon: React.ComponentType<{ className?: string }>
+}
+
+interface NavGroup {
+  category: string | null
+  items: NavItem[]
+}
+
+const navigation: NavGroup[] = [
+  {
+    category: null,
+    items: [{ name: "Dashboard", href: "/dashboard", icon: LayoutDashboard }],
+  },
+  {
+    category: "Analytics",
+    items: [
+      { name: "Forecast", href: "/forecast", icon: BarChart3 },
+      { name: "Upsell", href: "/upsell", icon: TrendingUp },
+      { name: "Churn", href: "/churn", icon: TrendingDown },
+    ],
+  },
+  {
+    category: "Portefeuille",
+    items: [
+      { name: "Portefeuille", href: "/portfolio", icon: Users },
+      { name: "Comptes", href: "/accounts", icon: Building2 },
+      { name: "NRR Detail", href: "/nrr", icon: Activity },
+      { name: "Renouvellements", href: "/renewals", icon: CalendarClock },
+      { name: "Commissions", href: "/commissions", icon: Coins },
+    ],
+  },
+  {
+    category: "Upsell",
+    items: [
+      { name: "Pipeline", href: "/pipeline", icon: GitBranch },
+      { name: "Upsell Signals", href: "/upsell-signals", icon: Sparkles },
+    ],
+  },
 ]
 
 export function Sidebar() {
@@ -57,25 +88,41 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-2 py-3 space-y-0.5">
-        {navigation.map((item) => {
-          const isActive = pathname === item.href || (item.href === "/accounts" && pathname.startsWith("/account"))
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] font-medium transition-colors duration-100",
-                isActive
-                  ? "bg-sidebar-active text-text-primary"
-                  : "text-text-secondary hover:bg-card-hover hover:text-text-primary"
-              )}
-            >
-              <item.icon className={cn("w-[18px] h-[18px] flex-shrink-0", isActive ? "text-accent" : "text-text-muted")} />
-              {!collapsed && <span>{item.name}</span>}
-            </Link>
-          )
-        })}
+      <nav className="flex-1 px-2 py-3 space-y-3 overflow-y-auto">
+        {navigation.map((group, idx) => (
+          <div key={group.category ?? `group-${idx}`} className="space-y-0.5">
+            {group.category && !collapsed && (
+              <div className="px-2.5 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                {group.category}
+              </div>
+            )}
+            {group.items.map((item) => {
+              const isActive =
+                pathname === item.href ||
+                (item.href === "/accounts" && pathname.startsWith("/account"))
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] font-medium transition-colors duration-100",
+                    isActive
+                      ? "bg-sidebar-active text-text-primary"
+                      : "text-text-secondary hover:bg-card-hover hover:text-text-primary"
+                  )}
+                >
+                  <item.icon
+                    className={cn(
+                      "w-[18px] h-[18px] flex-shrink-0",
+                      isActive ? "text-accent" : "text-text-muted"
+                    )}
+                  />
+                  {!collapsed && <span>{item.name}</span>}
+                </Link>
+              )
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* Collapse toggle */}

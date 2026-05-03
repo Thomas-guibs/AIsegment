@@ -14,6 +14,7 @@ export interface HubSpotDeal {
     hs_acv: string | null
     attribution: string | null
     renewall_date: string | null
+    renewall_strategy: string | null
     date_de_prise_en_compte: string | null
     closedate: string | null
     dealstage: string
@@ -88,6 +89,7 @@ export interface Deal {
   acv: number
   attribution: string | null
   renewalDate: string | null
+  renewalStrategy: string | null
   operationDate: string | null
   closeDate: string | null
   stage: string

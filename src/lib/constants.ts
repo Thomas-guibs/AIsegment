@@ -269,6 +269,7 @@ export const DEAL_PROPERTIES = [
   "hs_acv",
   "attribution",
   "renewall_date",
+  "renewall_strategy",
   "date_de_prise_en_compte",
   "date_de_paiement",
   "expected_closing_date",

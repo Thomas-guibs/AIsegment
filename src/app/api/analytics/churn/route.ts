@@ -5,10 +5,17 @@ import { fetchAttributionDeals, enrichDealsWithCompanies, fetchRenewalDeals } fr
 import { fetchCustomerCompanies } from "@/lib/hubspot/companies"
 import { ATTRIBUTION, SALES_STAGES, CSM_TEAM, CHART_CSMS } from "@/lib/constants"
 import { format, startOfMonth, subMonths, getQuarter, startOfQuarter, startOfWeek, addWeeks, addMonths } from "date-fns"
-import type { Deal, Company } from "@/lib/types"
+import type { Company } from "@/lib/types"
 
 const TIER_FALLBACK = "Non défini"
-const AT_RISK_STAGES_HUBSPOT = ["at_risk"]
+
+// Match any value containing "risk" / "risque" (case-insensitive) so we tolerate
+// HubSpot label variants like "At Risk", "À risque", "at_risk", "a_risque", etc.
+function isAtRiskStrategy(strategy: string | null): boolean {
+  if (!strategy) return false
+  const s = strategy.toLowerCase()
+  return s.includes("risk") || s.includes("risque")
+}
 
 function monthKey(d: Date) { return format(d, "yyyy-MM") }
 function monthLabel(d: Date) { return format(d, "MMM yy") }
@@ -73,12 +80,8 @@ export async function GET(request: NextRequest) {
     const enriched = await enrichDealsWithCompanies(churnDeals)
 
     const companyTier = new Map<string, string>()
-    const atRiskCompanyIds = new Set<string>()
     for (const c of allCompaniesArr as Company[]) {
       companyTier.set(c.id, c.revenueTier ?? TIER_FALLBACK)
-      if (c.customerStage && AT_RISK_STAGES_HUBSPOT.includes(c.customerStage)) {
-        atRiskCompanyIds.add(c.id)
-      }
     }
 
     const monthBuckets = buildMonthBuckets(months)
@@ -142,8 +145,8 @@ export async function GET(request: NextRequest) {
     const openChurnDeals = allChurnDeals.filter((d) => d.stage !== SALES_STAGES.CLOSED_WON && d.stage !== SALES_STAGES.CLOSED_LOST)
     const openChurnAmount = openChurnDeals.reduce((s, d) => s + d.amount, 0)
 
-    // At-risk renewals: companies in at_risk stage with an upcoming renewal
-    const atRiskRenewals = upcomingRenewals.filter((d) => d.companyId && atRiskCompanyIds.has(d.companyId))
+    // At-risk renewals: renewal deals tagged with renewall_strategy = "at risk"
+    const atRiskRenewals = upcomingRenewals.filter((d) => isAtRiskStrategy(d.renewalStrategy))
     const atRiskAmount = atRiskRenewals.reduce((s, d) => s + d.amount, 0)
 
     // Forecast by month (next 6 months) — combine open churn deals (use closeDate if set, else month from createdAt+30d)

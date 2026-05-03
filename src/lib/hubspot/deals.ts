@@ -15,6 +15,7 @@ function transformDeal(raw: HubSpotDeal): Deal {
     acv: parseNumber(raw.properties.hs_acv),
     attribution: raw.properties.attribution ?? null,
     renewalDate: parseDate(raw.properties.renewall_date),
+    renewalStrategy: raw.properties.renewall_strategy ?? null,
     operationDate: parseDate(raw.properties.date_de_prise_en_compte),
     closeDate: parseDate(raw.properties.closedate),
     stage: raw.properties.dealstage ?? "",

@@ -88,7 +88,7 @@ function ChurnContent() {
             <div className="card">
               <p className="text-xs text-text-muted mb-1">Renouvellements à risque</p>
               <p className="text-2xl font-semibold text-warning">{formatCurrency(data.summary.atRiskAmount, true)}</p>
-              <p className="text-2xs text-text-muted mt-1">{data.summary.atRiskCount} comptes en at-risk</p>
+              <p className="text-2xs text-text-muted mt-1">{data.summary.atRiskCount} renouvellements at-risk</p>
             </div>
           </div>
 

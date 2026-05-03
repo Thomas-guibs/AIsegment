@@ -64,6 +64,7 @@ export async function GET(
           acv: parseNumber(r.properties.hs_acv),
           attribution: r.properties.attribution ?? null,
           renewalDate: parseDate(r.properties.renewall_date),
+          renewalStrategy: r.properties.renewall_strategy ?? null,
           operationDate: parseDate(r.properties.date_de_prise_en_compte),
           closeDate: parseDate(r.properties.closedate),
           stage: r.properties.dealstage ?? "",

@@ -9,8 +9,9 @@ import { MiniDonut } from "@/components/charts/DonutChart"
 import { DealsTable, DealsTableSkeleton } from "@/components/tables/DealsTable"
 import { useFetch } from "@/lib/hooks"
 import type { DashboardKpis, Deal } from "@/lib/types"
-import { STAGE_CATEGORY_COLORS, STAGE_CATEGORY_LABELS, type StageCategory } from "@/lib/constants"
+import { STAGE_CATEGORY_COLORS, STAGE_CATEGORY_LABELS, CHART_CSMS, type StageCategory } from "@/lib/constants"
 import { cn, formatCurrency } from "@/lib/utils"
+import { ErrorState } from "@/components/ui/ErrorState"
 import {
   DollarSign,
   Percent,
@@ -35,18 +36,24 @@ interface NrrTrendsResponse {
   global: NrrMonthData[]
 }
 
-// Active CSMs for chart series (must match API filter)
-const CHART_CSMS = [
-  { name: "Farah Bahoui", color: "#8B5CF6" },
-  { name: "Antoine de Chanaleilles", color: "#06B6D4" },
-  { name: "Marthe Potin", color: "#EC4899" },
-  { name: "Fatima Hilmi", color: "#F97316" },
-]
 
 function DashboardContent() {
-  const { data: kpis, loading: kpisLoading } = useFetch<DashboardKpis>("/api/kpis")
-  const { data: dealsData, loading: dealsLoading } = useFetch<{ deals: Deal[] }>("/api/deals")
-  const { data: nrrTrends, loading: nrrLoading } = useFetch<NrrTrendsResponse>("/api/nrr-trends")
+  const { data: kpis, loading: kpisLoading, error: kpisError, refetch: refetchKpis } = useFetch<DashboardKpis>("/api/kpis")
+  const { data: dealsData, loading: dealsLoading, error: dealsError, refetch: refetchDeals } = useFetch<{ deals: Deal[] }>("/api/deals")
+  const { data: nrrTrends, loading: nrrLoading, error: nrrError, refetch: refetchNrr } = useFetch<NrrTrendsResponse>("/api/nrr-trends")
+
+  const criticalError = kpisError && dealsError && nrrError
+  if (criticalError) {
+    return (
+      <div className="p-6">
+        <ErrorState
+          message="Impossible de charger le dashboard. Vérifie que le token HubSpot est configuré."
+          onRetry={() => { refetchKpis(); refetchDeals(); refetchNrr() }}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="p-6 space-y-6">
       {/* KPI Cards */}
@@ -105,9 +112,11 @@ function DashboardContent() {
               stacked
               height={280}
             />
+          ) : nrrError ? (
+            <ErrorState message="Impossible de charger les tendances NRR" onRetry={refetchNrr} />
           ) : (
             <div className="flex items-center justify-center h-[280px] text-text-muted text-sm">
-              Aucune donnee disponible
+              Aucune donnée disponible
             </div>
           )}
         </div>
@@ -133,9 +142,11 @@ function DashboardContent() {
               height={280}
               referenceLine={{ y: 100, label: "100%", color: "#64748B" }}
             />
+          ) : nrrError ? (
+            <ErrorState message="Impossible de charger les données NRR" onRetry={refetchNrr} />
           ) : (
             <div className="flex items-center justify-center h-[280px] text-text-muted text-sm">
-              Aucune donnee NRR disponible
+              Aucune donnée NRR disponible
             </div>
           )}
         </div>

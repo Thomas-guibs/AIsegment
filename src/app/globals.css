@@ -80,15 +80,15 @@
   }
 
   .badge-upsell {
-    @apply badge bg-emerald-50 text-emerald-600;
+    @apply badge bg-positive/15 text-positive;
   }
 
   .badge-churn {
-    @apply badge bg-red-50 text-red-600;
+    @apply badge bg-negative/15 text-negative;
   }
 
   .badge-downsell {
-    @apply badge bg-amber-50 text-amber-600;
+    @apply badge bg-warning/15 text-warning;
   }
 
   .skeleton {

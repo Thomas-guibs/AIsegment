@@ -6,6 +6,7 @@ import { LineChartComponent } from "@/components/charts/LineChart"
 import { BarChartComponent } from "@/components/charts/BarChart"
 import { useFetch } from "@/lib/hooks"
 import { cn, formatCurrency } from "@/lib/utils"
+import { CHART_CSMS } from "@/lib/constants"
 import { ChevronDown, ChevronUp } from "lucide-react"
 
 interface DealDetail {
@@ -41,12 +42,6 @@ interface NrrTrendsResponse {
   perCsm: CsmNrrTrend[]
 }
 
-const CHART_CSMS = [
-  { name: "Farah Bahoui", color: "#8B5CF6" },
-  { name: "Antoine de Chanaleilles", color: "#06B6D4" },
-  { name: "Marthe Potin", color: "#EC4899" },
-  { name: "Fatima Hilmi", color: "#F97316" },
-]
 
 function NrrContent() {
   const [range, setRange] = useState<"6" | "12">("6")

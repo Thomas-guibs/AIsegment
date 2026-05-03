@@ -228,6 +228,11 @@ export const CSM_TEAM: CSMMember[] = [
 
 export const CSM_TEAM_IDS = CSM_TEAM.map((m) => m.id)
 
+// CSMs who appear as chart series (excludes backup/COO)
+export const CHART_CSMS = CSM_TEAM
+  .filter((m) => m.role !== "COO (backup)")
+  .map((m) => ({ name: m.name, color: m.color }))
+
 export function getCsmById(id: string): CSMMember | undefined {
   return CSM_TEAM.find((m) => m.id === id)
 }

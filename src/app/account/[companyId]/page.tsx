@@ -350,9 +350,9 @@ function UpsellSignalsCard({ companyId, signals: initialSignals }: { companyId: 
   }
 
   const gradeColors = {
-    hot: "bg-red-50 text-red-600 border-red-200",
-    warm: "bg-amber-50 text-amber-600 border-amber-200",
-    cold: "bg-slate-50 text-slate-500 border-slate-200",
+    hot: "bg-negative/15 text-negative border-negative/30",
+    warm: "bg-warning/15 text-warning border-warning/30",
+    cold: "bg-card-hover text-text-muted border-card-border",
   }
 
   const gradeIcons = {
@@ -429,7 +429,7 @@ function UpsellSignalsCard({ companyId, signals: initialSignals }: { companyId: 
                   const score = sib.icpScore ?? 0
                   const scoreColor = score >= 50 ? "text-positive bg-positive/10 border-positive/20" :
                     score >= 20 ? "text-warning bg-warning/10 border-warning/20" :
-                    "text-text-muted bg-gray-100 border-gray-200"
+                    "text-text-muted bg-card-hover border-card-border"
                   return (
                     <div key={sib.siren} className="flex items-center gap-2 text-2xs">
                       <span className={cn("inline-flex items-center justify-center w-8 h-5 rounded border font-mono font-semibold flex-shrink-0", scoreColor)}>

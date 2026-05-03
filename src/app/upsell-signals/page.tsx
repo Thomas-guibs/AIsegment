@@ -7,6 +7,7 @@ import { useFetch } from "@/lib/hooks"
 import { cn, formatCurrency } from "@/lib/utils"
 import { CSM_TEAM } from "@/lib/constants"
 import { Sparkles, Flame, ExternalLink, Users, ShoppingCart, Loader2, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react"
+import { toast } from "sonner"
 
 interface UpsellSignal {
   parentCompanyId: string
@@ -114,11 +115,17 @@ function UpsellSignalsContent() {
         return
       }
       if (!res.ok || json.error) {
-        setLastEnrich({ kind: "error", text: `Erreur ${res.status} : ${json.error ?? "inconnue"}${json.details ? ` — ${json.details}` : ""}` })
+        const msg = `Erreur ${res.status} : ${json.error ?? "inconnue"}${json.details ? ` — ${json.details}` : ""}`
+        setLastEnrich({ kind: "error", text: msg })
+        toast.error(msg)
       } else if (json.done) {
-        setLastEnrich({ kind: "info", text: json.message ?? "Tous les comptes sont enrichis" })
+        const msg = json.message ?? "Tous les comptes sont enrichis"
+        setLastEnrich({ kind: "info", text: msg })
+        toast.success(msg)
       } else {
-        setLastEnrich({ kind: "info", text: `${json.name} enrichi : ${json.signalsCount} signaux dont ${json.hotCount} hot` })
+        const msg = `${json.name} enrichi : ${json.signalsCount} signaux dont ${json.hotCount} hot`
+        setLastEnrich({ kind: "info", text: msg })
+        toast.success(msg)
       }
       refetch()
     } catch (e) {

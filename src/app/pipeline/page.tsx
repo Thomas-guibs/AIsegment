@@ -183,10 +183,10 @@ function PipelineContent() {
                       className={cn(
                         "text-[9px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0",
                         deal.dealType === "upsell"
-                          ? "bg-emerald-50 text-emerald-600"
+                          ? "bg-positive/15 text-positive"
                           : deal.dealType === "renewal+upsell"
-                            ? "bg-blue-50 text-blue-600"
-                            : "bg-gray-100 text-gray-500"
+                            ? "bg-accent/15 text-accent"
+                            : "bg-card-hover text-text-muted"
                       )}
                     >
                       {deal.dealType === "upsell" ? "Upsell" : deal.dealType === "renewal+upsell" ? "R+U" : "Renewal"}

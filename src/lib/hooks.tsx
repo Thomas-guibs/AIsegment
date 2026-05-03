@@ -48,25 +48,32 @@ export function useFetch<T>(url: string, params?: Record<string, string>): UseFe
     setLoading(true)
     setError(null)
 
-    try {
-      const extraParams = paramsString ? JSON.parse(paramsString) : {}
-      const queryParams = new URLSearchParams({
-        period,
-        ...(csmId ? { csmId } : {}),
-        ...extraParams,
-      })
+    const extraParams = paramsString ? JSON.parse(paramsString) : {}
+    const queryParams = new URLSearchParams({
+      period,
+      ...(csmId ? { csmId } : {}),
+      ...extraParams,
+    })
+    const fullUrl = `${url}?${queryParams.toString()}`
 
-      const response = await fetch(`${url}?${queryParams.toString()}`)
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await fetch(fullUrl)
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`)
+        }
+        const json = await response.json()
+        setData(json)
+        setLoading(false)
+        return
+      } catch (err) {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 3000))
+        } else {
+          setError(err instanceof Error ? err.message : "An error occurred")
+          setLoading(false)
+        }
       }
-
-      const json = await response.json()
-      setData(json)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred")
-    } finally {
-      setLoading(false)
     }
   }, [url, period, csmId, paramsString, tick])
 

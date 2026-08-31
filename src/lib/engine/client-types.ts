@@ -36,6 +36,7 @@ export interface MovementDetail {
   accountName: string | null
   referenceDate: string | null
   stage: string
+  /** As recorded in the CRM. Informational — it filters nothing. */
   eligibility: boolean | null
   csmId: string
   attributionFallback: string | null
@@ -60,6 +61,7 @@ export interface DiagnosticDeal {
   paymentDate: string | null
   operationDate: string | null
   stage: string
+  /** As recorded in the CRM. Informational — it filters nothing. */
   eligibility: boolean | null
 }
 
@@ -135,8 +137,6 @@ export interface Diagnostics {
 }
 
 export interface MetricsConfigShape {
-  eligibilityMode: string
-  applyEligibilityToUpsell: boolean
   quarterlyNrrMethod: string
   movementAttribution: string
   minMrrUnderManagement: number

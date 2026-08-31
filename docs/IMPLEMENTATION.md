@@ -3,8 +3,9 @@
 `docs/CALCUL.md` est la spécification. Ce document dit **où** chaque règle vit,
 et quels arbitrages ont été pris là où la spécification laissait le choix.
 
-> La partie **commission** (§7 et §11.4 de la spécification) n'est pas
-> implémentée : elle est hors périmètre de cet outil.
+> Deux parties de la spécification ne sont pas implémentées :
+> - la **commission** (§7, §11.4), hors périmètre de cet outil ;
+> - l'**eligibility** (§5), retirée pour le moment — voir plus bas.
 
 ## Chaîne de calcul
 
@@ -28,21 +29,42 @@ recalcule un MRR ou un NRR de son côté.
 | modèle normalisé | `engine/model.ts` | Comptes à trois historiques, mouvements typés |
 | §3 MRR sous gestion | `engine/portfolio.ts` | Les cinq conditions, dans l'ordre |
 | §4 sortie + veto | `engine/portfolio.ts` | Signaux de sortie et veto phase active + perte partielle |
-| §5 mouvements | `engine/movements.ts` | Ordre d'évaluation, dates, montants, eligibility, attribution |
+| §5 mouvements | `engine/movements.ts` | Ordre d'évaluation, dates, montants, attribution |
 | §6 NRR | `engine/metrics.ts` | Mensuel et agrégation `weighted` / `mean` / `compound` |
 | §9 diagnostics | `engine/diagnostics.ts` | Six familles de signaux |
 | §10 corrections | `engine/overrides.ts` | Motif obligatoire, valeur d'origine conservée |
 | §12 options | `engine/config.ts` | Défauts + lecture depuis la query string |
 
-## Points où le code s'écarte de la lettre de la spécification
+## L'eligibility est retirée : tous les deals comptent
 
-Trois écarts, tous dictés par l'état réel du portail.
+`deal_eligibility` n'entre dans aucun filtre. Un deal est décompté quel que soit
+son eligibility — renseignée à Oui, à Non, ou pas renseignée du tout.
 
-**`deal_eligibility` vaut `true` / `false`, pas `Yes` / `No`.** La propriété est
-une énumération dont les valeurs internes sont `true` et `false` (libellés
-Oui / Non). `parseEligibility()` accepte les deux familles ; toute autre valeur,
-vide comprise, est traitée comme **non renseignée** — ce qui n'est pas la même
-chose que Non, et les deux sont diagnostiqués séparément.
+C'est un écart assumé avec la §5 de la spécification, pour une raison de donnée :
+la grande majorité des churns de ce CRM n'ont pas d'eligibility renseignée. Le
+mode `strict` en écartait l'essentiel, et le NRR s'en trouvait mécaniquement
+surévalué — en faveur des CSM. Compter tous les deals donne une image plus
+fidèle que filtrer sur une propriété que personne ne remplit.
+
+Conséquences directes :
+
+- le NRR **baisse**, puisque le churn est désormais décompté en entier ;
+- la sortie des comptes churnés (§4) se déclenche sur tous les churns, donc le
+  MRR fantôme est nettoyé plus complètement ;
+- `eligibility_mode` et `apply_eligibility_to_upsell` n'existent plus dans la
+  configuration, et les sélecteurs correspondants ont disparu de l'interface.
+
+La propriété reste lue dans le modèle (`Movement.eligibility`) : elle ne coûte
+rien à récupérer et la réactiver plus tard reste un petit diff.
+
+**Le filtre de stage, lui, est conservé.** Il ne s'agit pas du même problème :
+seuls **5 churns** se trouvent hors de la liste des stages retenus, contre
+**348 upsells** — et ces derniers sont des opportunités en cours ou abandonnées
+(« Discovery call planned », « Not the good time », « Discard »), le plus souvent
+sans montant ni date de paiement. Les compter reviendrait à enregistrer du
+revenu qui n'a pas eu lieu.
+
+## Points où le code s'écarte encore de la spécification
 
 **Nora Rodriguez manquait à l'équipe CSM.** Elle porte 52 comptes actifs et
 n'était dans aucune constante. Ajoutée à `CSM_TEAM`.
@@ -51,14 +73,7 @@ n'était dans aucune constante. Ajoutée à `CSM_TEAM`.
 relève 158 comptes en phase `churn` portant encore un MRR ; à la date de
 l'implémentation ils sont **221**. La règle ne change pas, seul son volume.
 
-## Deux choses à savoir avant de lire un chiffre
-
-**Le mode `strict` masque la majeure partie du churn.** La plupart des deals de
-churn de ce CRM n'ont pas d'`eligibility` renseignée. En strict, ils ne sont pas
-décomptés et le NRR est mécaniquement surévalué — en faveur des CSM. Ce n'est
-pas un défaut du calcul, c'est un trou de saisie : la page Tendances affiche un
-bandeau dès que le cas se présente, et les deux modes se comparent depuis la
-barre d'outils.
+## À savoir avant de lire un chiffre
 
 **Un NRR absent n'est pas un NRR à zéro.** Un portefeuille vide ne peut pas
 avoir de NRR ; le calcul renvoie `null` et les vues affichent « n/a ». Le seul
@@ -75,7 +90,8 @@ npm test
 Maison Berger Paris, sunii. `tests/rules.test.ts` couvre les règles que ces cas
 n'exercent pas et les pièges de la §8 qui échoueraient en silence — l'ordre de
 l'historique HubSpot, le stage « Churn & Downsell », `abs(amount)` contre
-`hs_mrr`, l'attribution au 1er du mois.
+`hs_mrr`, l'attribution au 1er du mois, et le fait qu'un deal soit compté quelle
+que soit son eligibility.
 
 Les trois comptes de la §11 ont été revérifiés dans le portail : les montants,
 stages et eligibility correspondent. Seule l'`operation date` de sunii a bougé
@@ -88,9 +104,8 @@ le comportement qu'ils vérifient, pas la donnée.
 Toutes les options de la §12 se pilotent par query string sur `/api/metrics` :
 
 ```
-/api/metrics?months=12&eligibility=include_unset&nrrMethod=mean
-             &attribution=owner_at_event&excludeChurnedAccounts=false
-             &backfillHistory=true&refresh=true
+/api/metrics?months=12&nrrMethod=mean&attribution=owner_at_event
+             &excludeChurnedAccounts=false&backfillHistory=true&refresh=true
 ```
 
 Une valeur inconnue retombe silencieusement sur le défaut — une query string

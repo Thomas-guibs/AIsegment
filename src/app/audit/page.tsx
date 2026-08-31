@@ -96,11 +96,7 @@ function Th({ children, right }: { children: React.ReactNode; right?: boolean })
 
 function AuditContent() {
   const [range, setRange] = useState<"6" | "12">("6")
-  const [eligibility, setEligibility] = useState("strict")
-  const { data, loading } = useFetch<MetricsResponse>("/api/metrics", {
-    months: range,
-    eligibility,
-  })
+  const { data, loading } = useFetch<MetricsResponse>("/api/metrics", { months: range })
 
   if (loading || !data) {
     return (
@@ -133,29 +129,6 @@ function AuditContent() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] uppercase tracking-wide text-text-muted">Eligibility</span>
-          <div className="flex items-center gap-0.5 bg-card rounded-lg p-0.5 border border-card-border">
-            {[
-              { value: "strict", label: "Strict" },
-              { value: "include_unset", label: "+ non renseigné" },
-              { value: "all", label: "Tous" },
-            ].map((o) => (
-              <button
-                key={o.value}
-                onClick={() => setEligibility(o.value)}
-                className={cn(
-                  "px-2.5 py-1 text-[11px] rounded-md font-medium transition-colors whitespace-nowrap",
-                  eligibility === o.value
-                    ? "bg-accent text-white"
-                    : "text-text-secondary hover:text-text-primary"
-                )}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </div>
         <span className="text-[10px] text-text-muted ml-auto font-mono">
           Snapshot du {new Date(data.capturedAt).toLocaleString("fr-FR")}
         </span>
@@ -185,7 +158,7 @@ function AuditContent() {
       <Section
         icon={<AlertTriangle className="w-4 h-4" />}
         title="Mouvements écartés, par motif"
-        explanation="Anomalies de saisie : date de référence absente, eligibility manquante, montant nul, CSM non identifiable. Chacune est une correction à faire dans HubSpot."
+        explanation="Anomalies de saisie : date de référence absente, montant nul, CSM non identifiable. Chacune est une correction à faire dans HubSpot. L'eligibility n'écarte rien — tous les deals sont comptés."
         count={s.anomalyCount}
         tone="danger"
       >

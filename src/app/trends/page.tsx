@@ -7,13 +7,7 @@ import { LineChartComponent } from "@/components/charts/LineChart"
 import { useFetch } from "@/lib/hooks"
 import { formatCurrency, cn } from "@/lib/utils"
 import { formatNrr, type MetricsResponse, type MonthlyMetrics } from "@/lib/engine/client-types"
-import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react"
-
-const ELIGIBILITY_OPTIONS = [
-  { value: "strict", label: "Strict", hint: "Yes uniquement — conforme au plan" },
-  { value: "include_unset", label: "+ non renseigné", hint: "Yes + eligibility vide" },
-  { value: "all", label: "Tous", hint: "Aucun filtre d'eligibility" },
-]
+import { ChevronDown, ChevronRight } from "lucide-react"
 
 const NRR_METHODS = [
   { value: "weighted", label: "Pondéré", hint: "Chaque mois pesé par son MRR de début" },
@@ -53,14 +47,12 @@ function Toggle<T extends string>({
 
 function TrendsContent() {
   const [range, setRange] = useState<"6" | "12">("6")
-  const [eligibility, setEligibility] = useState("strict")
   const [nrrMethod, setNrrMethod] = useState("weighted")
   const [selectedCsm, setSelectedCsm] = useState<string | null>(null)
   const [openMonth, setOpenMonth] = useState<string | null>(null)
 
   const { data, loading } = useFetch<MetricsResponse>("/api/metrics", {
     months: range,
-    eligibility,
     nrrMethod,
   })
 
@@ -109,8 +101,6 @@ function TrendsContent() {
   }
 
   const anomalies = data?.diagnostics.summary.anomalyCount ?? 0
-  const missingEligibility =
-    data?.diagnostics.rejectedByReason.find((g) => g.reason === "missing_eligibility")?.count ?? 0
 
   return (
     <div className="p-6 space-y-6">
@@ -125,10 +115,6 @@ function TrendsContent() {
             value={range}
             onChange={setRange}
           />
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] uppercase tracking-wide text-text-muted">Eligibility</span>
-            <Toggle options={ELIGIBILITY_OPTIONS} value={eligibility} onChange={setEligibility} />
-          </div>
           <div className="flex items-center gap-1.5">
             <span className="text-[10px] uppercase tracking-wide text-text-muted">NRR agrégé</span>
             <Toggle options={NRR_METHODS} value={nrrMethod} onChange={setNrrMethod} />
@@ -164,23 +150,6 @@ function TrendsContent() {
           ))}
         </div>
       </div>
-
-      {/* Data-quality banner — strict mode hides most of the churn in this CRM */}
-      {!loading && eligibility === "strict" && missingEligibility > 0 && (
-        <div className="card flex items-start gap-3 border-warning/40 bg-warning/5">
-          <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
-          <div className="text-xs text-text-secondary leading-relaxed">
-            <span className="font-medium text-text-primary">
-              {missingEligibility} mouvement{missingEligibility > 1 ? "s" : ""} écarté
-              {missingEligibility > 1 ? "s" : ""} faute d&apos;eligibility renseignée.
-            </span>{" "}
-            En mode strict, une partie du churn n&apos;est pas décomptée et le NRR est
-            mécaniquement surévalué — en faveur des CSM. Ce n&apos;est pas un défaut du calcul mais
-            un trou de saisie&nbsp;: comparez avec «&nbsp;+ non renseigné&nbsp;» avant de figer un
-            chiffre.
-          </div>
-        </div>
-      )}
 
       {loading || !data ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

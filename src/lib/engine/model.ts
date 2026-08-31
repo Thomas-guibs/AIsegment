@@ -44,7 +44,10 @@ export interface Movement {
   paymentDate: string | null
   /** `date_de_prise_en_compte` — operation date. Dates a churn or a downsell. */
   operationDate: string | null
-  /** `deal_eligibility`: true / false / null when never filled in. */
+  /**
+   * `deal_eligibility`, as recorded in the CRM. **Not used by the calculation**
+   * — every deal counts. Kept so re-enabling the filter stays a small change.
+   */
   eligibility: boolean | null
   stage: string
   /** Deal owner, the last-resort attribution fallback. */

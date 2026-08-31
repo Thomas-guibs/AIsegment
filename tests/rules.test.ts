@@ -146,8 +146,9 @@ describe("§4 ghost MRR — total_revenue is never reset", () => {
   })
 
   it("a churn that is not counted does not evict the account either", async () => {
-    // Strict eligibility drops the churn from the NRR; it must not strip the
-    // MRR, otherwise the loss would vanish without ever being counted.
+    // A churn left out of the NRR must not strip the MRR either, otherwise the
+    // loss would vanish without ever being counted. Eligibility no longer
+    // excludes anything, so the remaining way out is an out-of-scope stage.
     const acc = account({
       id: "a",
       name: "A",
@@ -156,30 +157,28 @@ describe("§4 ghost MRR — total_revenue is never reset", () => {
       phase: "Run",
       firstPaymentDate: "2025-01-01",
     })
-    const uncounted = movement({
+    const negotiating = movement({
       id: "m",
       type: "churn",
       amount: -400,
       operationDate: "2026-02-10",
-      eligibility: null, // never filled in — 200 churns out of 283 in this CRM
-      stage: STAGE_CHURN_DOWNSELL,
+      stage: "qualifiedtobuy", // still being discussed, not a booked loss
       accountId: "a",
     })
 
-    const strict = await computeMetrics({
-      snapshot: snapshot([acc], [uncounted]),
+    const notYet = await computeMetrics({
+      snapshot: snapshot([acc], [negotiating]),
       months: ["2026-03"],
       csmIds: [CSM_A],
     })
-    expect(strict.perCsm[0].months[0].startingMrr).toBe(400)
+    expect(notYet.perCsm[0].months[0].startingMrr).toBe(400)
 
-    const permissive = await computeMetrics({
-      snapshot: snapshot([acc], [uncounted]),
+    const booked = await computeMetrics({
+      snapshot: snapshot([acc], [{ ...negotiating, stage: STAGE_CHURN_DOWNSELL }]),
       months: ["2026-03"],
       csmIds: [CSM_A],
-      config: { eligibilityMode: "include_unset" },
     })
-    expect(permissive.perCsm[0].months[0].startingMrr).toBe(0)
+    expect(booked.perCsm[0].months[0].startingMrr).toBe(0)
   })
 })
 
@@ -288,33 +287,42 @@ describe("§5 movement pipeline", () => {
     expect(result.diagnostics.rejectedByReason[0].reason).toBe("missing_reference_date")
   })
 
-  it("upsell escapes eligibility by default, churn does not", async () => {
-    const upsell = movement({
-      id: "u",
-      type: "upsell",
-      amount: 100,
-      paymentDate: "2026-05-20",
-      eligibility: null,
-      stage: STAGE_CLOSED_WON,
-      accountId: "a",
-    })
-    const churn = movement({
-      id: "c",
-      type: "churn",
-      amount: -50,
-      operationDate: "2026-05-20",
-      eligibility: null,
-      stage: STAGE_CHURN_DOWNSELL,
-      accountId: "a",
-    })
-
-    const result = await computeMetrics({
-      snapshot: snapshot([acc], [upsell, churn]),
-      months: ["2026-05"],
-      csmIds: [CSM_A],
-    })
-    expect(result.perCsm[0].months[0].upsell).toBe(100)
-    expect(result.perCsm[0].months[0].churn).toBe(0)
+  it("counts every deal whatever its eligibility", async () => {
+    // Most churns in this CRM carry no eligibility at all. Filtering on it
+    // dropped the majority of the churn and inflated NRR, so it filters nothing.
+    const cases: Array<boolean | null> = [true, false, null]
+    for (const eligibility of cases) {
+      const result = await computeMetrics({
+        snapshot: snapshot(
+          [acc],
+          [
+            movement({
+              id: "u",
+              type: "upsell",
+              amount: 100,
+              paymentDate: "2026-05-20",
+              eligibility,
+              stage: STAGE_CLOSED_WON,
+              accountId: "a",
+            }),
+            movement({
+              id: "c",
+              type: "churn",
+              amount: -50,
+              operationDate: "2026-05-20",
+              eligibility,
+              stage: STAGE_CHURN_DOWNSELL,
+              accountId: "a",
+            }),
+          ]
+        ),
+        months: ["2026-05"],
+        csmIds: [CSM_A],
+      })
+      expect(result.perCsm[0].months[0].upsell).toBe(100)
+      expect(result.perCsm[0].months[0].churn).toBe(50)
+      expect(result.diagnostics.summary.anomalyCount).toBe(0)
+    }
   })
 
   it("attributes to the owner at month start, not the deal owner", async () => {

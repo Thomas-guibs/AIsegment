@@ -7,9 +7,12 @@
 //   1. Stage filter        — a deal still being negotiated is not an anomaly.
 //   2. Reference date      — absent → anomaly.
 //   3. Month in range      — outside → ignored, silently.
-//   4. Eligibility         — missing → anomaly.
-//   5. Non-zero amount     — zero → anomaly.
-//   6. CSM attribution     — unattributable → anomaly.
+//   4. Non-zero amount     — zero → anomaly.
+//   5. CSM attribution     — unattributable → anomaly.
+//
+// `deal_eligibility` is NOT a filter: every deal counts, whatever its
+// eligibility. Most churns in this CRM have it blank, and filtering on it
+// dropped the majority of the churn from the NRR.
 // =============================================================================
 
 import { valueAt, firstValue } from "./timeline"
@@ -22,8 +25,6 @@ import type { DealOverride } from "./overrides"
 export type RejectionReason =
   | "stage_out_of_scope"
   | "missing_reference_date"
-  | "missing_eligibility"
-  | "not_eligible"
   | "zero_amount"
   | "unattributable"
 
@@ -52,29 +53,6 @@ export interface RejectedMovement {
 export interface MovementResult {
   retained: RetainedMovement[]
   rejected: RejectedMovement[]
-}
-
-/** Does the eligibility of this deal clear the configured mode? */
-function passesEligibility(
-  movement: Movement,
-  config: MetricsConfig
-): { ok: true } | { ok: false; reason: RejectionReason } {
-  // An upsell is dated by its payment, so it escapes eligibility by default.
-  if (movement.type === "upsell" && !config.applyEligibilityToUpsell) return { ok: true }
-
-  switch (config.eligibilityMode) {
-    case "all":
-      return { ok: true }
-    case "include_unset":
-      return movement.eligibility === false ? { ok: false, reason: "not_eligible" } : { ok: true }
-    case "strict":
-    default:
-      if (movement.eligibility === true) return { ok: true }
-      return {
-        ok: false,
-        reason: movement.eligibility === null ? "missing_eligibility" : "not_eligible",
-      }
-  }
 }
 
 /**
@@ -164,21 +142,14 @@ export function filterMovements(
 
     const override = overrides.get(movement.id)
 
-    // 4. Eligibility.
-    const eligibility = passesEligibility(movement, config)
-    if (!eligibility.ok) {
-      rejected.push({ movement, reason: eligibility.reason, stage: movement.stage })
-      continue
-    }
-
-    // 5. Non-zero amount.
+    // 4. Non-zero amount.
     const amount = override?.amount != null ? Math.abs(override.amount) : movement.amount
     if (amount === 0) {
       rejected.push({ movement, reason: "zero_amount", stage: movement.stage })
       continue
     }
 
-    // 6. Attribution to a CSM.
+    // 5. Attribution to a CSM.
     const overrideCsm = override?.csmId
     const attributed = overrideCsm
       ? { csmId: overrideCsm, fallback: null as RetainedMovement["attributionFallback"] }

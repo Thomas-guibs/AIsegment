@@ -3,9 +3,6 @@
 // Every arbitrable rule is an option. Defaults reproduce the reference spec.
 // =============================================================================
 
-/** Which deals count as a decremented churn/downsell (spec §5, "Eligibility"). */
-export type EligibilityMode = "strict" | "include_unset" | "all"
-
 /** How a quarterly NRR aggregates its monthly components (spec §6). */
 export type QuarterlyNrrMethod = "weighted" | "mean" | "compound"
 
@@ -16,10 +13,6 @@ export type MovementAttribution = "owner_at_month_start" | "owner_at_event" | "d
 export type MovementType = "upsell" | "downsell" | "churn"
 
 export interface MetricsConfig {
-  /** Yes only / + unset / everything. Default `strict`, per the comp plan. */
-  eligibilityMode: EligibilityMode
-  /** Upsell is dated by its payment, so it escapes eligibility by default. */
-  applyEligibilityToUpsell: boolean
   /** Aggregation of the quarterly NRR. */
   quarterlyNrrMethod: QuarterlyNrrMethod
   /** Attaching a movement to a CSM. */
@@ -41,6 +34,12 @@ export interface MetricsConfig {
 }
 
 // -----------------------------------------------------------------------------
+// NOTE — `deal_eligibility` is deliberately NOT a filter (see docs/IMPLEMENTATION.md).
+// Every deal counts, whatever its eligibility. The property is still read into
+// the model so re-enabling it later is a small change, but nothing acts on it.
+// -----------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
 // Stage allowlists (spec §5, "Stages retenus")
 // ⚠️ In this portal internal ids do not match displayed labels:
 //    closedlost → "Closed won" · closedwon → "Offre envoyé (70 %)"
@@ -60,8 +59,6 @@ export const DEFAULT_ALLOWED_STAGES: Record<MovementType, string[]> = {
 }
 
 export const DEFAULT_CONFIG: MetricsConfig = {
-  eligibilityMode: "strict",
-  applyEligibilityToUpsell: false,
   quarterlyNrrMethod: "weighted",
   movementAttribution: "owner_at_month_start",
   minMrrUnderManagement: 0,
@@ -81,7 +78,6 @@ export function resolveConfig(overrides: Partial<MetricsConfig> = {}): MetricsCo
   }
 }
 
-const ELIGIBILITY_MODES: EligibilityMode[] = ["strict", "include_unset", "all"]
 const NRR_METHODS: QuarterlyNrrMethod[] = ["weighted", "mean", "compound"]
 const ATTRIBUTION_MODES: MovementAttribution[] = ["owner_at_month_start", "owner_at_event", "deal_owner"]
 
@@ -99,17 +95,11 @@ function bool(raw: string | null): boolean | undefined {
 export function configFromParams(params: URLSearchParams): MetricsConfig {
   const overrides: Partial<MetricsConfig> = {}
 
-  const eligibility = pick(params.get("eligibility"), ELIGIBILITY_MODES)
-  if (eligibility) overrides.eligibilityMode = eligibility
-
   const nrrMethod = pick(params.get("nrrMethod"), NRR_METHODS)
   if (nrrMethod) overrides.quarterlyNrrMethod = nrrMethod
 
   const attribution = pick(params.get("attribution"), ATTRIBUTION_MODES)
   if (attribution) overrides.movementAttribution = attribution
-
-  const upsellEligibility = bool(params.get("applyEligibilityToUpsell"))
-  if (upsellEligibility !== undefined) overrides.applyEligibilityToUpsell = upsellEligibility
 
   const excludeChurned = bool(params.get("excludeChurnedAccounts"))
   if (excludeChurned !== undefined) overrides.excludeChurnedAccounts = excludeChurned

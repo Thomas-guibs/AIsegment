@@ -19,8 +19,6 @@ import type { LoadedOverride, DealOverride } from "./overrides"
 export const REJECTION_LABELS: Record<RejectionReason, string> = {
   stage_out_of_scope: "Hors périmètre (stage)",
   missing_reference_date: "Date de référence absente",
-  missing_eligibility: "Eligibility non renseignée",
-  not_eligible: "Eligibility à Non",
   zero_amount: "Montant nul",
   unattributable: "CSM non identifiable",
 }
@@ -28,8 +26,6 @@ export const REJECTION_LABELS: Record<RejectionReason, string> = {
 /** Only these are anomalies. An out-of-scope stage is information. */
 export const ANOMALY_REASONS: RejectionReason[] = [
   "missing_reference_date",
-  "missing_eligibility",
-  "not_eligible",
   "zero_amount",
   "unattributable",
 ]

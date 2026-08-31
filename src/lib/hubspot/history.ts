@@ -101,23 +101,40 @@ export async function fetchDealCompanyMap(dealIds: string[]): Promise<Map<string
     batches.push(dealIds.slice(i, i + BATCH_SIZE))
   }
 
+  let failedBatches = 0
+
   const slices = await mapLimit(batches, CONCURRENCY, async (batch) => {
-    try {
-      const response = await hubspotFetch<{
+    const body = { inputs: batch.map((id) => ({ id })) }
+    const call = () =>
+      hubspotFetch<{
         results: Array<{ from: { id: string }; to: Array<{ toObjectId: string }> }>
-      }>("/crm/v4/associations/deals/companies/batch/read", {
-        method: "POST",
-        body: { inputs: batch.map((id) => ({ id })) },
-      })
-      return response.results ?? []
+      }>("/crm/v4/associations/deals/companies/batch/read", { method: "POST", body })
+
+    try {
+      return (await call()).results ?? []
     } catch {
-      return []
+      try {
+        return (await call()).results ?? []
+      } catch {
+        // A dropped batch costs its deals their account: they lose their
+        // attribution and stop feeding their account's first billing date.
+        // Never silent — the count is surfaced to the caller.
+        failedBatches += 1
+        return []
+      }
     }
   })
 
   for (const result of slices.flat()) {
     const companyId = result.to?.[0]?.toObjectId
     if (companyId) map.set(result.from.id, String(companyId))
+  }
+
+  if (failedBatches > 0) {
+    console.warn(
+      `[snapshot] ${failedBatches}/${batches.length} deal→company association batches failed; ` +
+        `up to ${failedBatches * BATCH_SIZE} deals are unlinked in this snapshot.`
+    )
   }
 
   return map

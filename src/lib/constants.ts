@@ -220,8 +220,9 @@ export interface CSMMember {
 export const CSM_TEAM: CSMMember[] = [
   { id: "1331556319", name: "Farah Bahoui", role: "Senior CSM", initials: "FB", color: "#8B5CF6" },
   { id: "75406611", name: "Antoine de Chanaleilles", role: "Senior CSM", initials: "AC", color: "#06B6D4" },
-  { id: "78820483", name: "Marthe Potin", role: "CSM", initials: "MP", color: "#EC4899" },
+  { id: "34101101", name: "Nora Rodriguez", role: "CSM", initials: "NR", color: "#2563EB" },
   { id: "31564081", name: "Fatima Hilmi", role: "CSM", initials: "FH", color: "#F97316" },
+  { id: "78820483", name: "Marthe Potin", role: "CSM", initials: "MP", color: "#EC4899" },
   { id: "1949410186", name: "Antoine Rivaud", role: "CSM", initials: "AR", color: "#14B8A6" },
   { id: "44919918", name: "Thomas Prouveur", role: "COO (backup)", initials: "TP", color: "#64748B" },
 ]
@@ -273,6 +274,9 @@ export const DEAL_PROPERTIES = [
   "createdate",
   "hs_lastmodifieddate",
   "hs_deal_stage_probability",
+  // Movement calculation (see src/lib/engine) — spec §5
+  "date_de_paiement",   // Effective payment date: dates an upsell
+  "deal_eligibility",   // "true"/"false" internally; blank = never filled in
 ] as const
 
 // Company properties to fetch

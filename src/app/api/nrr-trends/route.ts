@@ -1,18 +1,45 @@
 export const dynamic = "force-dynamic"
 
+// =============================================================================
+// NRR Trends — spec CALCUL.md §3 §4 §5 §6
+//
+// Point-in-time reading. For each month M:
+//   T = 1st of M at 00:00 UTC
+//   MRR_début(csm, M) = Σ mrr_at(T) sur companies passant les 5 conditions §3
+//                       et non sorties §4
+//   Mouvements(csm, M) = Σ retained movements dont movementDate ∈ M,
+//                        attribués au CSM propriétaire à T (owner_at_month_start §5)
+//   NRR(csm, M) = (MRR_début + upsell − churn − downsell) / MRR_début  (§6)
+//   NRR(csm, quarter) = weighted formula (§6)
+// =============================================================================
+
 import { NextRequest, NextResponse } from "next/server"
 import { fetchCustomerCompanies } from "@/lib/hubspot/companies"
-import { fetchAttributionDeals } from "@/lib/hubspot/deals"
-import type { Deal } from "@/lib/types"
-import { ATTRIBUTION, CSM_TEAM, isRetainedMovement, movementDate } from "@/lib/constants"
+import { fetchAttributionDeals, enrichDealsWithCompanies } from "@/lib/hubspot/deals"
+import { fetchCompanyHistoryBatch } from "@/lib/hubspot/history"
+import {
+  ATTRIBUTION,
+  CSM_TEAM,
+  isRetainedMovement,
+  movementDate,
+} from "@/lib/constants"
+import {
+  earliestPaymentByCompany,
+  dealsByCompany,
+  mrrUnderManagement,
+  ownerAtMonthStart,
+  monthlyNrr,
+  weightedQuarterlyNrr,
+  firstOfMonthUTC,
+} from "@/lib/analytics/portfolio"
 import {
   startOfMonth,
   subMonths,
   endOfMonth,
   format,
+  getQuarter,
 } from "date-fns"
 
-// Acquisition attributions = new business
 const ACQUISITION_ATTRIBUTIONS = [
   ATTRIBUTION.PARTNERS,
   ATTRIBUTION.HUNT,
@@ -22,7 +49,6 @@ const ACQUISITION_ATTRIBUTIONS = [
   ATTRIBUTION.PLG,
 ]
 
-// CSMs to include in the analysis (exclude backup/inactive)
 const ACTIVE_CSMS = CSM_TEAM.filter(
   (c) => c.id !== "1949410186" && c.id !== "44919918" // Exclude Antoine Rivaud & Thomas Prouveur
 )
@@ -33,8 +59,10 @@ interface DealDetail {
   amount: number
   attribution: string
   companyName?: string
-  ownerId: string | null
+  ownerId: string | null       // deal-level owner
+  attributedCsm: string | null // spec §5 owner_at_month_start
   operationDate: string | null
+  paymentDate: string | null
   stage: string
 }
 
@@ -46,10 +74,14 @@ interface NrrMonthData {
   churn: number
   downsell: number
   newBusiness: number
-  // Per spec §6: null when MRR_début ≤ 0 (a starting-empty portfolio isn't a portfolio
-  // that lost everything — the NRR is simply not computable).
+  nrr: number | null   // null when MRR_début ≤ 0
+  deals: DealDetail[]
+}
+
+interface QuarterlyNrr {
+  quarterLabel: string
+  months: string[]
   nrr: number | null
-  deals: DealDetail[] // individual deals for this month
 }
 
 interface CsmNrrTrend {
@@ -57,16 +89,24 @@ interface CsmNrrTrend {
   csmName: string
   color: string
   months: NrrMonthData[]
+  quarters: QuarterlyNrr[]
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams
-    const monthsBack = parseInt(searchParams.get("months") ?? "6", 10)
+    const monthsBack = parseInt(
+      request.nextUrl.searchParams.get("months") ?? "6",
+      10
+    )
 
     const now = new Date()
-    const months: { start: Date; end: Date; key: string; label: string }[] = []
-
+    const months: {
+      start: Date
+      end: Date
+      key: string
+      label: string
+      tIso: string
+    }[] = []
     for (let i = monthsBack - 1; i >= 0; i--) {
       const monthDate = subMonths(now, i)
       const start = startOfMonth(monthDate)
@@ -76,200 +116,214 @@ export async function GET(request: NextRequest) {
         end,
         key: format(start, "yyyy-MM"),
         label: format(start, "MMM yy"),
+        tIso: firstOfMonthUTC(start.getFullYear(), start.getMonth() + 1),
       })
     }
 
-    const globalDateFrom = format(months[0].start, "yyyy-MM-dd")
-    const globalDateTo = format(months[months.length - 1].end, "yyyy-MM-dd")
+    // Wide window for earliest-payment discovery (covers historical first bills)
+    const wideFrom = "2010-01-01"
+    const wideTo = format(now, "yyyy-MM-dd")
 
-    // Fetch all data in parallel
-    const [companies, allMovements, allAcquisitions] = await Promise.all([
+    // Fetch — companies + all deals in the sales pipeline that carry a payment
+    // or a movement. We fetch ALL attributions (movements + acquisitions) on a
+    // very wide window so earliest-payment lookup has the first bill.
+    const [activeCompanies, allAttributedDealsRaw] = await Promise.all([
       fetchCustomerCompanies(),
       fetchAttributionDeals(
-        [ATTRIBUTION.UPSELL, ATTRIBUTION.CHURN, ATTRIBUTION.DOWNSELL],
-        globalDateFrom,
-        globalDateTo
-      ),
-      fetchAttributionDeals(
-        ACQUISITION_ATTRIBUTIONS,
-        globalDateFrom,
-        globalDateTo
+        [
+          ATTRIBUTION.UPSELL,
+          ATTRIBUTION.CHURN,
+          ATTRIBUTION.DOWNSELL,
+          ...ACQUISITION_ATTRIBUTIONS,
+        ],
+        wideFrom,
+        wideTo
       ),
     ])
+    const allDeals = await enrichDealsWithCompanies(allAttributedDealsRaw)
 
-    // --- Filters (spec §5) ---
-    // A retained movement passes stage + reference-date + non-zero amount filters.
-    // Reference date differs by type:
-    //   - Upsell:   date_de_paiement    (the money is only acquired when received)
-    //   - Churn:    date_de_prise_en_compte
-    //   - Downsell: date_de_prise_en_compte
-    const monthOf = (d: Deal): string | null => movementDate(d)?.slice(0, 7) ?? null
+    // Enrich with company IDs the deals reference (some may not be in
+    // activeCompanies — e.g. churned accounts still relevant for history).
+    const companyIdSet = new Set<string>()
+    for (const c of activeCompanies) companyIdSet.add(c.id)
+    for (const d of allDeals) if (d.companyId) companyIdSet.add(d.companyId)
 
-    const toDealDetail = (d: Deal): DealDetail => ({
-      id: d.id,
-      name: d.name,
-      amount: d.amount,
-      attribution: d.attribution ?? "",
-      companyName: d.companyName,
-      ownerId: d.ownerId,
-      operationDate: d.operationDate,
-      stage: d.stage,
+    // Fetch point-in-time history for every relevant company
+    const historyMap = await fetchCompanyHistoryBatch(Array.from(companyIdSet))
+    const historyList = Array.from(historyMap.values())
+
+    // Derived maps for §3 condition 4 and §4 exit signal
+    const earliestPayment = earliestPaymentByCompany(allDeals)
+    const companyDealsMap = dealsByCompany(allDeals)
+
+    // -------------------------------------------------------------------------
+    // MRR under management per (CSM, month) — spec §3 §4
+    // -------------------------------------------------------------------------
+    const mrrByCsmMonth = new Map<string, Map<string, number>>()
+    // key format: `${csmId}::${monthKey}` → mrr
+    for (const m of months) {
+      const contribs = mrrUnderManagement(
+        historyList,
+        earliestPayment,
+        companyDealsMap,
+        m.tIso
+      )
+      for (const c of contribs) {
+        if (!mrrByCsmMonth.has(c.csm)) mrrByCsmMonth.set(c.csm, new Map())
+        const csmMap = mrrByCsmMonth.get(c.csm)!
+        csmMap.set(m.key, (csmMap.get(m.key) ?? 0) + c.mrr)
+      }
+    }
+
+    // Global MRR under management per month
+    const globalMrrByMonth = new Map<string, number>()
+    for (const m of months) {
+      let total = 0
+      mrrByCsmMonth.forEach((csmMap) => {
+        total += csmMap.get(m.key) ?? 0
+      })
+      globalMrrByMonth.set(m.key, total)
+    }
+
+    // -------------------------------------------------------------------------
+    // Movements per (CSM, month) with owner_at_month_start attribution — spec §5
+    // -------------------------------------------------------------------------
+    interface Bucket {
+      upsell: number
+      churn: number
+      downsell: number
+      newBusiness: number
+      deals: DealDetail[]
+    }
+    const emptyBucket = (): Bucket => ({
+      upsell: 0,
+      churn: 0,
+      downsell: 0,
+      newBusiness: 0,
+      deals: [],
     })
 
-    // --- Per-CSM NRR ---
+    const monthKeys = new Set(months.map((m) => m.key))
+    const perCsmMovements = new Map<string, Map<string, Bucket>>()
+    const globalMovements = new Map<string, Bucket>()
+    for (const m of months) globalMovements.set(m.key, emptyBucket())
+
+    for (const deal of allDeals) {
+      const isAcquisition =
+        !!deal.attribution && (ACQUISITION_ATTRIBUTIONS as readonly string[]).includes(deal.attribution)
+      const isMovement = isRetainedMovement(deal)
+      if (!isAcquisition && !isMovement) continue
+
+      // Bucket month key: movementDate for movements, operationDate for acquisitions
+      let refDate: string | null
+      if (isMovement) {
+        refDate = movementDate(deal) ?? null
+      } else {
+        refDate = deal.operationDate ?? null
+      }
+      if (!refDate) continue
+      const mk = refDate.slice(0, 7)
+      if (!monthKeys.has(mk)) continue
+
+      // Spec §5 attribution: owner_at_month_start (same rule for movements + new biz)
+      const csm = ownerAtMonthStart(
+        deal,
+        deal.companyId ? historyMap.get(deal.companyId) : undefined
+      )
+
+      const amt = Math.abs(deal.amount)
+      const detail: DealDetail = {
+        id: deal.id,
+        name: deal.name,
+        amount: deal.amount,
+        attribution: deal.attribution ?? "",
+        companyName: deal.companyName,
+        ownerId: deal.ownerId,
+        attributedCsm: csm,
+        operationDate: deal.operationDate,
+        paymentDate: deal.paymentDate,
+        stage: deal.stage,
+      }
+
+      // Global
+      const gb = globalMovements.get(mk)!
+      if (isMovement) {
+        if (deal.attribution === ATTRIBUTION.UPSELL) gb.upsell += amt
+        else if (deal.attribution === ATTRIBUTION.CHURN) gb.churn += amt
+        else if (deal.attribution === ATTRIBUTION.DOWNSELL) gb.downsell += amt
+      } else {
+        gb.newBusiness += amt
+      }
+      gb.deals.push(detail)
+
+      // Per-CSM
+      if (csm) {
+        if (!perCsmMovements.has(csm)) perCsmMovements.set(csm, new Map())
+        const csmMap = perCsmMovements.get(csm)!
+        if (!csmMap.has(mk)) csmMap.set(mk, emptyBucket())
+        const b = csmMap.get(mk)!
+        if (isMovement) {
+          if (deal.attribution === ATTRIBUTION.UPSELL) b.upsell += amt
+          else if (deal.attribution === ATTRIBUTION.CHURN) b.churn += amt
+          else if (deal.attribution === ATTRIBUTION.DOWNSELL) b.downsell += amt
+        } else {
+          b.newBusiness += amt
+        }
+        b.deals.push(detail)
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Assemble per-CSM series
+    // -------------------------------------------------------------------------
     const csmTrends: CsmNrrTrend[] = []
-
     for (const csm of ACTIVE_CSMS) {
-      const csmCompanies = companies.filter((c) => c.ownerId === csm.id)
-      const currentMrr = csmCompanies.reduce((sum, c) => sum + c.mrr, 0)
-
-      const csmMovements = allMovements.filter((d) => d.ownerId === csm.id)
-      const csmAcquisitions = allAcquisitions.filter((d) => d.ownerId === csm.id)
-
-      // Group by month
-      const monthlyUpsell: Record<string, number> = {}
-      const monthlyChurn: Record<string, number> = {}
-      const monthlyDownsell: Record<string, number> = {}
-      const monthlyNewBiz: Record<string, number> = {}
-      const monthlyDeals: Record<string, DealDetail[]> = {}
-
-      for (const deal of csmMovements) {
-        if (!isRetainedMovement(deal)) continue
-        const mk = monthOf(deal)
-        if (!mk) continue
-        if (!monthlyDeals[mk]) monthlyDeals[mk] = []
-        const amt = Math.abs(deal.amount)
-
-        if (deal.attribution === ATTRIBUTION.UPSELL) {
-          monthlyUpsell[mk] = (monthlyUpsell[mk] ?? 0) + amt
-        } else if (deal.attribution === ATTRIBUTION.CHURN) {
-          monthlyChurn[mk] = (monthlyChurn[mk] ?? 0) + amt
-        } else if (deal.attribution === ATTRIBUTION.DOWNSELL) {
-          monthlyDownsell[mk] = (monthlyDownsell[mk] ?? 0) + amt
+      const bucketsForCsm = perCsmMovements.get(csm.id)
+      const mrrMap = mrrByCsmMonth.get(csm.id)
+      const monthData: NrrMonthData[] = months.map((m) => {
+        const b = bucketsForCsm?.get(m.key) ?? emptyBucket()
+        const startingMrr = mrrMap?.get(m.key) ?? 0
+        return {
+          month: m.key,
+          monthLabel: m.label,
+          startingMrr: round2(startingMrr),
+          upsell: round2(b.upsell),
+          churn: round2(b.churn),
+          downsell: round2(b.downsell),
+          newBusiness: round2(b.newBusiness),
+          nrr: roundOrNull(monthlyNrr(startingMrr, b.upsell, b.churn, b.downsell)),
+          deals: b.deals,
         }
-        monthlyDeals[mk].push(toDealDetail(deal))
-      }
-
-      for (const deal of csmAcquisitions) {
-        const mk = deal.operationDate?.slice(0, 7) ?? null
-        if (!mk) continue
-        monthlyNewBiz[mk] = (monthlyNewBiz[mk] ?? 0) + Math.abs(deal.amount)
-      }
-
-      // Calculate starting MRR per month (working backwards from current)
-      const monthData: NrrMonthData[] = []
-
-      for (let i = 0; i < months.length; i++) {
-        const month = months[i]
-        const mk = month.key
-
-        const upsell = monthlyUpsell[mk] ?? 0
-        const churn = monthlyChurn[mk] ?? 0
-        const downsell = monthlyDownsell[mk] ?? 0
-        const newBiz = monthlyNewBiz[mk] ?? 0
-
-        let futureUpsell = 0, futureChurn = 0, futureDownsell = 0, futureNewBiz = 0
-        for (let j = i; j < months.length; j++) {
-          const fmk = months[j].key
-          futureUpsell += monthlyUpsell[fmk] ?? 0
-          futureChurn += monthlyChurn[fmk] ?? 0
-          futureDownsell += monthlyDownsell[fmk] ?? 0
-          futureNewBiz += monthlyNewBiz[fmk] ?? 0
-        }
-
-        const startingMrr = currentMrr - futureUpsell + futureChurn + futureDownsell - futureNewBiz
-        // Spec §6: NRR = MRR_fin / MRR_début. Not computable when MRR_début ≤ 0.
-        const nrr = startingMrr > 0
-          ? Math.round(((startingMrr + upsell - churn - downsell) / startingMrr) * 10000) / 100
-          : null
-
-        monthData.push({
-          month: mk,
-          monthLabel: month.label,
-          startingMrr: Math.round(startingMrr * 100) / 100,
-          upsell: Math.round(upsell * 100) / 100,
-          churn: Math.round(churn * 100) / 100,
-          downsell: Math.round(downsell * 100) / 100,
-          newBusiness: Math.round(newBiz * 100) / 100,
-          nrr,
-          deals: monthlyDeals[mk] ?? [],
-        })
-      }
+      })
 
       csmTrends.push({
         csmId: csm.id,
         csmName: csm.name,
         color: csm.color,
         months: monthData,
+        quarters: buildQuarters(monthData),
       })
     }
 
-    // --- Global NRR ---
-    const totalCurrentMrr = companies.reduce((sum, c) => sum + c.mrr, 0)
-    const globalMonthData: NrrMonthData[] = []
-
-    const gMonthlyUpsell: Record<string, number> = {}
-    const gMonthlyChurn: Record<string, number> = {}
-    const gMonthlyDownsell: Record<string, number> = {}
-    const gMonthlyNewBiz: Record<string, number> = {}
-    const gMonthlyDeals: Record<string, DealDetail[]> = {}
-
-    for (const deal of allMovements) {
-      if (!isRetainedMovement(deal)) continue
-      const mk = monthOf(deal)
-      if (!mk) continue
-      if (!gMonthlyDeals[mk]) gMonthlyDeals[mk] = []
-      const amt = Math.abs(deal.amount)
-
-      if (deal.attribution === ATTRIBUTION.UPSELL) {
-        gMonthlyUpsell[mk] = (gMonthlyUpsell[mk] ?? 0) + amt
-      } else if (deal.attribution === ATTRIBUTION.CHURN) {
-        gMonthlyChurn[mk] = (gMonthlyChurn[mk] ?? 0) + amt
-      } else if (deal.attribution === ATTRIBUTION.DOWNSELL) {
-        gMonthlyDownsell[mk] = (gMonthlyDownsell[mk] ?? 0) + amt
+    // -------------------------------------------------------------------------
+    // Assemble global series
+    // -------------------------------------------------------------------------
+    const globalMonthData: NrrMonthData[] = months.map((m) => {
+      const b = globalMovements.get(m.key)!
+      const startingMrr = globalMrrByMonth.get(m.key) ?? 0
+      return {
+        month: m.key,
+        monthLabel: m.label,
+        startingMrr: round2(startingMrr),
+        upsell: round2(b.upsell),
+        churn: round2(b.churn),
+        downsell: round2(b.downsell),
+        newBusiness: round2(b.newBusiness),
+        nrr: roundOrNull(monthlyNrr(startingMrr, b.upsell, b.churn, b.downsell)),
+        deals: b.deals,
       }
-      gMonthlyDeals[mk].push(toDealDetail(deal))
-    }
-    for (const deal of allAcquisitions) {
-      const mk = deal.operationDate?.slice(0, 7) ?? null
-      if (!mk) continue
-      gMonthlyNewBiz[mk] = (gMonthlyNewBiz[mk] ?? 0) + Math.abs(deal.amount)
-    }
-
-    for (let i = 0; i < months.length; i++) {
-      const month = months[i]
-      const mk = month.key
-      const upsell = gMonthlyUpsell[mk] ?? 0
-      const churn = gMonthlyChurn[mk] ?? 0
-      const downsell = gMonthlyDownsell[mk] ?? 0
-      const newBiz = gMonthlyNewBiz[mk] ?? 0
-
-      let futureUpsell = 0, futureChurn = 0, futureDownsell = 0, futureNewBiz = 0
-      for (let j = i; j < months.length; j++) {
-        const fmk = months[j].key
-        futureUpsell += gMonthlyUpsell[fmk] ?? 0
-        futureChurn += gMonthlyChurn[fmk] ?? 0
-        futureDownsell += gMonthlyDownsell[fmk] ?? 0
-        futureNewBiz += gMonthlyNewBiz[fmk] ?? 0
-      }
-
-      const startingMrr = totalCurrentMrr - futureUpsell + futureChurn + futureDownsell - futureNewBiz
-      const nrr = startingMrr > 0
-        ? Math.round(((startingMrr + upsell - churn - downsell) / startingMrr) * 10000) / 100
-        : null
-
-      globalMonthData.push({
-        month: mk,
-        monthLabel: month.label,
-        startingMrr: Math.round(startingMrr * 100) / 100,
-        upsell: Math.round(upsell * 100) / 100,
-        churn: Math.round(churn * 100) / 100,
-        downsell: Math.round(downsell * 100) / 100,
-        newBusiness: Math.round(newBiz * 100) / 100,
-        nrr,
-        deals: gMonthlyDeals[mk] ?? [],
-      })
-    }
+    })
+    const globalQuarters = buildQuarters(globalMonthData)
 
     // Chart-ready data
     const chartData = months.map((month, i) => {
@@ -287,6 +341,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       chartData,
       global: globalMonthData,
+      globalQuarters,
       perCsm: csmTrends,
       months: months.map((m) => ({ key: m.key, label: m.label })),
     })
@@ -297,4 +352,39 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
+function roundOrNull(n: number | null): number | null {
+  if (n === null) return null
+  return Math.round(n * 100) / 100
+}
+
+// Aggregate monthly metrics into calendar quarters and apply spec §6 weighted.
+function buildQuarters(months: NrrMonthData[]): QuarterlyNrr[] {
+  const byQuarter = new Map<string, NrrMonthData[]>()
+  for (const m of months) {
+    const [y, mm] = m.month.split("-").map(Number)
+    const q = getQuarter(new Date(Date.UTC(y, mm - 1, 1)))
+    const key = `${y}-Q${q}`
+    if (!byQuarter.has(key)) byQuarter.set(key, [])
+    byQuarter.get(key)!.push(m)
+  }
+  return Array.from(byQuarter.entries()).map(([label, ms]) => ({
+    quarterLabel: label,
+    months: ms.map((m) => m.month),
+    nrr: roundOrNull(
+      weightedQuarterlyNrr(
+        ms.map((m) => ({
+          startingMrr: m.startingMrr,
+          upsell: m.upsell,
+          churn: m.churn,
+          downsell: m.downsell,
+        }))
+      )
+    ),
+  }))
 }

@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { fetchCustomerCompanies } from "@/lib/hubspot/companies"
 import { fetchAttributionDeals } from "@/lib/hubspot/deals"
 import type { Deal } from "@/lib/types"
-import { ATTRIBUTION, CSM_TEAM, SALES_STAGES } from "@/lib/constants"
+import { ATTRIBUTION, CSM_TEAM, isRetainedMovement, movementDate } from "@/lib/constants"
 import {
   startOfMonth,
   subMonths,
@@ -21,9 +21,6 @@ const ACQUISITION_ATTRIBUTIONS = [
   ATTRIBUTION.EVENT,
   ATTRIBUTION.PLG,
 ]
-
-// "Closed Won" stages in HubSpot (inverted naming: closedlost = Closed Won)
-const CLOSED_WON_STAGES: string[] = [SALES_STAGES.CLOSED_WON, SALES_STAGES.PAIEMENT_RECU]
 
 // CSMs to include in the analysis (exclude backup/inactive)
 const ACTIVE_CSMS = CSM_TEAM.filter(
@@ -49,7 +46,9 @@ interface NrrMonthData {
   churn: number
   downsell: number
   newBusiness: number
-  nrr: number
+  // Per spec §6: null when MRR_début ≤ 0 (a starting-empty portfolio isn't a portfolio
+  // that lost everything — the NRR is simply not computable).
+  nrr: number | null
   deals: DealDetail[] // individual deals for this month
 }
 
@@ -98,20 +97,13 @@ export async function GET(request: NextRequest) {
       ),
     ])
 
-    // --- Filters ---
-    // Upsell: only count deals in Closed Won stage with operation date in month
-    const isValidUpsell = (d: Deal): boolean =>
-      d.attribution === ATTRIBUTION.UPSELL &&
-      CLOSED_WON_STAGES.includes(d.stage) &&
-      d.operationDate != null
-
-    // Churn/Downsell: use operation date
-    const isValidChurnOrDownsell = (d: Deal): boolean =>
-      (d.attribution === ATTRIBUTION.CHURN || d.attribution === ATTRIBUTION.DOWNSELL) &&
-      d.operationDate != null
-
-    const getOperationMonth = (d: Deal): string | null =>
-      d.operationDate?.slice(0, 7) ?? null
+    // --- Filters (spec §5) ---
+    // A retained movement passes stage + reference-date + non-zero amount filters.
+    // Reference date differs by type:
+    //   - Upsell:   date_de_paiement    (the money is only acquired when received)
+    //   - Churn:    date_de_prise_en_compte
+    //   - Downsell: date_de_prise_en_compte
+    const monthOf = (d: Deal): string | null => movementDate(d)?.slice(0, 7) ?? null
 
     const toDealDetail = (d: Deal): DealDetail => ({
       id: d.id,
@@ -142,24 +134,24 @@ export async function GET(request: NextRequest) {
       const monthlyDeals: Record<string, DealDetail[]> = {}
 
       for (const deal of csmMovements) {
-        const mk = getOperationMonth(deal)
+        if (!isRetainedMovement(deal)) continue
+        const mk = monthOf(deal)
         if (!mk) continue
         if (!monthlyDeals[mk]) monthlyDeals[mk] = []
+        const amt = Math.abs(deal.amount)
 
-        if (isValidUpsell(deal)) {
-          monthlyUpsell[mk] = (monthlyUpsell[mk] ?? 0) + Math.abs(deal.amount)
-          monthlyDeals[mk].push(toDealDetail(deal))
-        } else if (deal.attribution === ATTRIBUTION.CHURN && deal.operationDate) {
-          monthlyChurn[mk] = (monthlyChurn[mk] ?? 0) + Math.abs(deal.amount)
-          monthlyDeals[mk].push(toDealDetail(deal))
-        } else if (deal.attribution === ATTRIBUTION.DOWNSELL && deal.operationDate) {
-          monthlyDownsell[mk] = (monthlyDownsell[mk] ?? 0) + Math.abs(deal.amount)
-          monthlyDeals[mk].push(toDealDetail(deal))
+        if (deal.attribution === ATTRIBUTION.UPSELL) {
+          monthlyUpsell[mk] = (monthlyUpsell[mk] ?? 0) + amt
+        } else if (deal.attribution === ATTRIBUTION.CHURN) {
+          monthlyChurn[mk] = (monthlyChurn[mk] ?? 0) + amt
+        } else if (deal.attribution === ATTRIBUTION.DOWNSELL) {
+          monthlyDownsell[mk] = (monthlyDownsell[mk] ?? 0) + amt
         }
+        monthlyDeals[mk].push(toDealDetail(deal))
       }
 
       for (const deal of csmAcquisitions) {
-        const mk = getOperationMonth(deal)
+        const mk = deal.operationDate?.slice(0, 7) ?? null
         if (!mk) continue
         monthlyNewBiz[mk] = (monthlyNewBiz[mk] ?? 0) + Math.abs(deal.amount)
       }
@@ -186,9 +178,10 @@ export async function GET(request: NextRequest) {
         }
 
         const startingMrr = currentMrr - futureUpsell + futureChurn + futureDownsell - futureNewBiz
+        // Spec §6: NRR = MRR_fin / MRR_début. Not computable when MRR_début ≤ 0.
         const nrr = startingMrr > 0
-          ? ((startingMrr + upsell - churn - downsell) / startingMrr) * 100
-          : 100
+          ? Math.round(((startingMrr + upsell - churn - downsell) / startingMrr) * 10000) / 100
+          : null
 
         monthData.push({
           month: mk,
@@ -198,7 +191,7 @@ export async function GET(request: NextRequest) {
           churn: Math.round(churn * 100) / 100,
           downsell: Math.round(downsell * 100) / 100,
           newBusiness: Math.round(newBiz * 100) / 100,
-          nrr: Math.round(nrr * 100) / 100,
+          nrr,
           deals: monthlyDeals[mk] ?? [],
         })
       }
@@ -222,23 +215,23 @@ export async function GET(request: NextRequest) {
     const gMonthlyDeals: Record<string, DealDetail[]> = {}
 
     for (const deal of allMovements) {
-      const mk = getOperationMonth(deal)
+      if (!isRetainedMovement(deal)) continue
+      const mk = monthOf(deal)
       if (!mk) continue
       if (!gMonthlyDeals[mk]) gMonthlyDeals[mk] = []
+      const amt = Math.abs(deal.amount)
 
-      if (isValidUpsell(deal)) {
-        gMonthlyUpsell[mk] = (gMonthlyUpsell[mk] ?? 0) + Math.abs(deal.amount)
-        gMonthlyDeals[mk].push(toDealDetail(deal))
-      } else if (deal.attribution === ATTRIBUTION.CHURN && deal.operationDate) {
-        gMonthlyChurn[mk] = (gMonthlyChurn[mk] ?? 0) + Math.abs(deal.amount)
-        gMonthlyDeals[mk].push(toDealDetail(deal))
-      } else if (deal.attribution === ATTRIBUTION.DOWNSELL && deal.operationDate) {
-        gMonthlyDownsell[mk] = (gMonthlyDownsell[mk] ?? 0) + Math.abs(deal.amount)
-        gMonthlyDeals[mk].push(toDealDetail(deal))
+      if (deal.attribution === ATTRIBUTION.UPSELL) {
+        gMonthlyUpsell[mk] = (gMonthlyUpsell[mk] ?? 0) + amt
+      } else if (deal.attribution === ATTRIBUTION.CHURN) {
+        gMonthlyChurn[mk] = (gMonthlyChurn[mk] ?? 0) + amt
+      } else if (deal.attribution === ATTRIBUTION.DOWNSELL) {
+        gMonthlyDownsell[mk] = (gMonthlyDownsell[mk] ?? 0) + amt
       }
+      gMonthlyDeals[mk].push(toDealDetail(deal))
     }
     for (const deal of allAcquisitions) {
-      const mk = getOperationMonth(deal)
+      const mk = deal.operationDate?.slice(0, 7) ?? null
       if (!mk) continue
       gMonthlyNewBiz[mk] = (gMonthlyNewBiz[mk] ?? 0) + Math.abs(deal.amount)
     }
@@ -262,8 +255,8 @@ export async function GET(request: NextRequest) {
 
       const startingMrr = totalCurrentMrr - futureUpsell + futureChurn + futureDownsell - futureNewBiz
       const nrr = startingMrr > 0
-        ? ((startingMrr + upsell - churn - downsell) / startingMrr) * 100
-        : 100
+        ? Math.round(((startingMrr + upsell - churn - downsell) / startingMrr) * 10000) / 100
+        : null
 
       globalMonthData.push({
         month: mk,
@@ -273,7 +266,7 @@ export async function GET(request: NextRequest) {
         churn: Math.round(churn * 100) / 100,
         downsell: Math.round(downsell * 100) / 100,
         newBusiness: Math.round(newBiz * 100) / 100,
-        nrr: Math.round(nrr * 100) / 100,
+        nrr,
         deals: gMonthlyDeals[mk] ?? [],
       })
     }

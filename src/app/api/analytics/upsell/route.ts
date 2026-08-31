@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic"
 
 import { NextRequest, NextResponse } from "next/server"
 import { fetchAttributionDeals, enrichDealsWithCompanies } from "@/lib/hubspot/deals"
-import { ATTRIBUTION, SALES_STAGES, SALES_STAGE_LABELS, CSM_TEAM, CHART_CSMS } from "@/lib/constants"
+import { ATTRIBUTION, SALES_STAGES, SALES_STAGE_LABELS, CSM_TEAM, CHART_CSMS, isRetainedMovement } from "@/lib/constants"
 import { format, startOfMonth, subMonths, getQuarter, startOfQuarter } from "date-fns"
 import type { Deal } from "@/lib/types"
 
@@ -75,18 +75,21 @@ export async function GET(request: NextRequest) {
     const monthBuckets = buildMonthBuckets(months)
     const quarterBuckets = buildQuarterBuckets(Math.ceil(months / 3))
 
-    // Toutes les transactions Upsell ayant une operationDate (date_de_prise_en_compte).
-    // C'est la date d'effet réel de l'upsell — on ignore closeDate / createdAt en bucketing.
-    const upsellByOpDate = enriched.filter((d) => !!d.operationDate)
+    // Retained upsell movements per spec §5:
+    //   - stage in [CLOSED_WON, PAIEMENT_RECU]
+    //   - paymentDate (date_de_paiement) present — the money is only acquired once received
+    //   - amount ≠ 0
+    // Bucketing key: paymentDate.slice(0, 7) → YYYY-MM
+    const retainedUpsells = enriched.filter(isRetainedMovement)
 
     // === 1. Upsell par mois / CSM ===
     const monthCsm: Record<string, Record<string, number>> = {}
     for (const b of monthBuckets) monthCsm[b.key] = {}
-    for (const d of upsellByOpDate) {
-      const k = d.operationDate!.slice(0, 7)
+    for (const d of retainedUpsells) {
+      const k = d.paymentDate!.slice(0, 7)
       if (!monthCsm[k]) continue
       const csm = csmShort(d.ownerId)
-      monthCsm[k][csm] = (monthCsm[k][csm] ?? 0) + d.amount
+      monthCsm[k][csm] = (monthCsm[k][csm] ?? 0) + Math.abs(d.amount)
     }
     const byMonthCsm = monthBuckets.map((b) => ({
       monthLabel: b.label,
@@ -96,9 +99,9 @@ export async function GET(request: NextRequest) {
     // === 2. Upsell par trimestre ===
     const quarterTotal: Record<string, number> = {}
     for (const b of quarterBuckets) quarterTotal[b.key] = 0
-    for (const d of upsellByOpDate) {
-      const k = quarterKey(new Date(d.operationDate!))
-      if (k in quarterTotal) quarterTotal[k] += d.amount
+    for (const d of retainedUpsells) {
+      const k = quarterKey(new Date(d.paymentDate!))
+      if (k in quarterTotal) quarterTotal[k] += Math.abs(d.amount)
     }
     const byQuarter = quarterBuckets.map((b) => ({
       quarterLabel: b.label,
@@ -113,24 +116,22 @@ export async function GET(request: NextRequest) {
 
     // === 4. Panier moyen ===
     const avgByMonth = monthBuckets.map((b) => {
-      const dealsOfMonth = upsellByOpDate.filter((d) => {
-        return d.operationDate!.slice(0, 7) === b.key
-      })
+      const dealsOfMonth = retainedUpsells.filter((d) => d.paymentDate!.slice(0, 7) === b.key)
       const avg = dealsOfMonth.length > 0
-        ? dealsOfMonth.reduce((s, d) => s + d.amount, 0) / dealsOfMonth.length
+        ? dealsOfMonth.reduce((s, d) => s + Math.abs(d.amount), 0) / dealsOfMonth.length
         : 0
       return { monthLabel: b.label, Moyenne: Math.round(avg) }
     })
-    const overallAvg = upsellByOpDate.length > 0
-      ? Math.round(upsellByOpDate.reduce((s, d) => s + d.amount, 0) / upsellByOpDate.length)
+    const overallAvg = retainedUpsells.length > 0
+      ? Math.round(retainedUpsells.reduce((s, d) => s + Math.abs(d.amount), 0) / retainedUpsells.length)
       : 0
 
     // === 5. Tier breakdown (via deal→company association) ===
     const tierAgg: Record<string, { amount: number; count: number }> = {}
-    for (const d of upsellByOpDate) {
+    for (const d of retainedUpsells) {
       const tier = d.companyRevenueTier || TIER_FALLBACK
       if (!tierAgg[tier]) tierAgg[tier] = { amount: 0, count: 0 }
-      tierAgg[tier].amount += d.amount
+      tierAgg[tier].amount += Math.abs(d.amount)
       tierAgg[tier].count += 1
     }
     const byTier = Object.entries(tierAgg)
@@ -181,9 +182,10 @@ export async function GET(request: NextRequest) {
       ...createdByMonthCsm[b.key],
     }))
 
-    // === 9. Flat deals list for the Liste tab ===
-    const dealsList = enriched
-      .sort((a, b) => (b.operationDate ?? "").localeCompare(a.operationDate ?? ""))
+    // === 9. Flat deals list for the Liste tab — retained upsells only, sorted by paymentDate ===
+    const dealsList = retainedUpsells
+      .slice()
+      .sort((a, b) => (b.paymentDate ?? "").localeCompare(a.paymentDate ?? ""))
       .map((d) => ({
         id: d.id,
         name: d.name,

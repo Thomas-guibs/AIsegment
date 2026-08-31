@@ -205,6 +205,59 @@ export const CSM_ATTRIBUTIONS = [
 ] as const
 
 // -----------------------------------------------------------------------------
+// Stages retained per movement type (spec §5)
+//
+// A movement is only counted at these stages (its "won" states). Deals in
+// earlier stages are legitimate WIP, not anomalies — they're filtered silently.
+//
+// Note: "closedlost" is inverted-named — it's actually the Closed Won stage.
+// See SALES_STAGES comment.
+// -----------------------------------------------------------------------------
+
+export const UPSELL_STAGES: string[] = [
+  SALES_STAGES.CLOSED_WON,        // "closedlost" (Closed Won)
+  SALES_STAGES.PAIEMENT_RECU,     // "143474109"
+]
+
+export const CHURN_DOWNSELL_STAGES: string[] = [
+  SALES_STAGES.CHURN_DOWNSELL,    // "1220133077" — where 275/283 churns land
+  SALES_STAGES.CLOSED_WON,        // "closedlost"
+  SALES_STAGES.PAIEMENT_RECU,     // "143474109"
+]
+
+// -----------------------------------------------------------------------------
+// Date used to attribute a movement to a month (spec §5)
+//
+// - Upsell: date_de_paiement (payment is when the upsell is acquired)
+// - Downsell/Churn: date_de_prise_en_compte (operation date — loss recorded)
+//
+// closeDate / createdAt are NOT used as fallbacks: no reference date = anomaly.
+// -----------------------------------------------------------------------------
+
+export function movementDate(deal: { attribution: string | null; paymentDate: string | null; operationDate: string | null }): string | null {
+  if (deal.attribution === ATTRIBUTION.UPSELL) return deal.paymentDate
+  return deal.operationDate
+}
+
+export function movementStages(attribution: string | null): string[] | null {
+  if (attribution === ATTRIBUTION.UPSELL) return UPSELL_STAGES
+  if (attribution === ATTRIBUTION.CHURN || attribution === ATTRIBUTION.DOWNSELL) return CHURN_DOWNSELL_STAGES
+  return null
+}
+
+// A movement is retained if:
+//   1. its stage is one of the "won" stages for its type
+//   2. its reference date is present (payment for upsell, operation for churn/downsell)
+//   3. its amount is non-zero
+export function isRetainedMovement(deal: { attribution: string | null; stage: string; paymentDate: string | null; operationDate: string | null; amount: number }): boolean {
+  const stages = movementStages(deal.attribution)
+  if (!stages || !stages.includes(deal.stage)) return false
+  if (!movementDate(deal)) return false
+  if (deal.amount === 0) return false
+  return true
+}
+
+// -----------------------------------------------------------------------------
 // CSM Team
 // Add a new CSM = add a new entry. That's it.
 // -----------------------------------------------------------------------------

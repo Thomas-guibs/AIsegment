@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic"
 import { NextRequest, NextResponse } from "next/server"
 import { fetchAttributionDeals, enrichDealsWithCompanies, fetchRenewalDeals } from "@/lib/hubspot/deals"
 import { fetchCustomerCompanies } from "@/lib/hubspot/companies"
-import { ATTRIBUTION, SALES_STAGES, CSM_TEAM, CHART_CSMS } from "@/lib/constants"
+import { ATTRIBUTION, SALES_STAGES, CSM_TEAM, CHART_CSMS, isRetainedMovement } from "@/lib/constants"
 import { format, startOfMonth, subMonths, getQuarter, startOfQuarter, startOfWeek, addWeeks, addMonths } from "date-fns"
 import type { Company } from "@/lib/types"
 
@@ -88,52 +88,53 @@ export async function GET(request: NextRequest) {
     const quarterBuckets = buildQuarterBuckets(Math.ceil(months / 3))
     const weekBuckets = buildWeekBuckets(12)
 
+    // Retained churn movements per spec §5:
+    //   - stage in [CHURN_DOWNSELL, CLOSED_WON, PAIEMENT_RECU]
+    //     (275/283 churns terminate in CHURN_DOWNSELL — excluding it drops nearly everything)
+    //   - operationDate (date_de_prise_en_compte) present
+    //   - amount ≠ 0
+    // Bucketing key: operationDate.slice(0, 7)
+    const retainedChurns = enriched.filter(isRetainedMovement)
+
     // === 1. Churn par mois / CSM ===
     const monthCsm: Record<string, Record<string, number>> = {}
     for (const b of monthBuckets) monthCsm[b.key] = {}
-    for (const d of enriched) {
-      const dt = d.closeDate ?? d.operationDate
-      if (!dt) continue
-      const k = dt.slice(0, 7)
+    for (const d of retainedChurns) {
+      const k = d.operationDate!.slice(0, 7)
       if (!monthCsm[k]) continue
       const csm = csmShort(d.ownerId)
-      monthCsm[k][csm] = (monthCsm[k][csm] ?? 0) + d.amount
+      monthCsm[k][csm] = (monthCsm[k][csm] ?? 0) + Math.abs(d.amount)
     }
     const byMonthCsm = monthBuckets.map((b) => ({ monthLabel: b.label, ...monthCsm[b.key] }))
 
     // === 2. Churn par trimestre / CSM ===
     const quarterCsm: Record<string, Record<string, number>> = {}
     for (const b of quarterBuckets) quarterCsm[b.key] = {}
-    for (const d of enriched) {
-      const dt = d.closeDate ?? d.operationDate
-      if (!dt) continue
-      const dateObj = new Date(dt)
-      const k = quarterKey(dateObj)
+    for (const d of retainedChurns) {
+      const k = quarterKey(new Date(d.operationDate!))
       if (!quarterCsm[k]) continue
       const csm = csmShort(d.ownerId)
-      quarterCsm[k][csm] = (quarterCsm[k][csm] ?? 0) + d.amount
+      quarterCsm[k][csm] = (quarterCsm[k][csm] ?? 0) + Math.abs(d.amount)
     }
     const byQuarterCsm = quarterBuckets.map((b) => ({ quarterLabel: b.label, ...quarterCsm[b.key] }))
 
     // === 3. Churn par semaine / CSM ===
     const weekCsm: Record<string, Record<string, number>> = {}
     for (const b of weekBuckets) weekCsm[b.key] = {}
-    for (const d of enriched) {
-      const dt = d.closeDate ?? d.operationDate
-      if (!dt) continue
-      const k = weekKey(new Date(dt))
+    for (const d of retainedChurns) {
+      const k = weekKey(new Date(d.operationDate!))
       if (!weekCsm[k]) continue
       const csm = csmShort(d.ownerId)
-      weekCsm[k][csm] = (weekCsm[k][csm] ?? 0) + d.amount
+      weekCsm[k][csm] = (weekCsm[k][csm] ?? 0) + Math.abs(d.amount)
     }
     const byWeekCsm = weekBuckets.map((b) => ({ weekLabel: b.label, ...weekCsm[b.key] }))
 
     // === 4. Tier breakdown ===
     const tierAgg: Record<string, { amount: number; count: number }> = {}
-    for (const d of enriched) {
+    for (const d of retainedChurns) {
       const tier = (d.companyId && companyTier.get(d.companyId)) || TIER_FALLBACK
       if (!tierAgg[tier]) tierAgg[tier] = { amount: 0, count: 0 }
-      tierAgg[tier].amount += d.amount
+      tierAgg[tier].amount += Math.abs(d.amount)
       tierAgg[tier].count += 1
     }
     const byTier = Object.entries(tierAgg)
@@ -141,13 +142,19 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => b.amount - a.amount)
 
     // === 5. Forecast churn ===
-    // Open churn deals already created (not yet closed-won) — they represent likely future churn.
-    const openChurnDeals = allChurnDeals.filter((d) => d.stage !== SALES_STAGES.CLOSED_WON && d.stage !== SALES_STAGES.CLOSED_LOST)
-    const openChurnAmount = openChurnDeals.reduce((s, d) => s + d.amount, 0)
+    // Open churn deals still in the pipeline: any stage that's NOT a retained "won" stage
+    // and NOT lost. These represent likely future churn.
+    const openChurnDeals = allChurnDeals.filter((d) =>
+      d.stage !== SALES_STAGES.CHURN_DOWNSELL &&
+      d.stage !== SALES_STAGES.CLOSED_WON &&
+      d.stage !== SALES_STAGES.PAIEMENT_RECU &&
+      d.stage !== SALES_STAGES.CLOSED_LOST
+    )
+    const openChurnAmount = openChurnDeals.reduce((s, d) => s + Math.abs(d.amount), 0)
 
     // At-risk renewals: renewal deals tagged with renewall_strategy = "at risk"
     const atRiskRenewals = upcomingRenewals.filter((d) => isAtRiskStrategy(d.renewalStrategy))
-    const atRiskAmount = atRiskRenewals.reduce((s, d) => s + d.amount, 0)
+    const atRiskAmount = atRiskRenewals.reduce((s, d) => s + Math.abs(d.amount), 0)
 
     // Forecast by month (next 6 months) — combine open churn deals (use closeDate if set, else month from createdAt+30d)
     // and at-risk renewals (use renewalDate)
@@ -161,15 +168,15 @@ export async function GET(request: NextRequest) {
     for (const b of forecastBuckets) forecastByMonth[b.key] = { openChurn: 0, atRisk: 0 }
 
     for (const d of openChurnDeals) {
-      const dt = d.closeDate ?? d.operationDate
+      const dt = d.operationDate ?? d.closeDate
       if (!dt) continue
       const k = dt.slice(0, 7)
-      if (forecastByMonth[k]) forecastByMonth[k].openChurn += d.amount
+      if (forecastByMonth[k]) forecastByMonth[k].openChurn += Math.abs(d.amount)
     }
     for (const d of atRiskRenewals) {
       if (!d.renewalDate) continue
       const k = d.renewalDate.slice(0, 7)
-      if (forecastByMonth[k]) forecastByMonth[k].atRisk += d.amount
+      if (forecastByMonth[k]) forecastByMonth[k].atRisk += Math.abs(d.amount)
     }
     const forecast = forecastBuckets.map((b) => ({
       monthLabel: b.label,
@@ -184,8 +191,8 @@ export async function GET(request: NextRequest) {
       byTier,
       forecast,
       summary: {
-        totalChurn: enriched.reduce((s, d) => s + d.amount, 0),
-        churnCount: enriched.length,
+        totalChurn: retainedChurns.reduce((s, d) => s + Math.abs(d.amount), 0),
+        churnCount: retainedChurns.length,
         openChurnAmount,
         openChurnCount: openChurnDeals.length,
         atRiskAmount,

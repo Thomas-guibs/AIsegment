@@ -253,6 +253,8 @@ export interface CsmPortfolio {
   accountCount: number
   totalMrr: number
   nrr: number
+  /** False when the portfolio was empty: the NRR is absent, not 0 %. */
+  nrrAvailable: boolean
   upsellThisMonth: number
   churnThisMonth: number
   renewals30d: number

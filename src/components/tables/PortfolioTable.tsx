@@ -130,8 +130,22 @@ export function PortfolioTable({ portfolios, onCsmClick }: PortfolioTableProps) 
                   <td className="px-4 py-3 font-mono text-sm text-text-primary">
                     {formatCurrency(p.totalMrr, true)}
                   </td>
-                  <td className="px-4 py-3 font-mono text-sm text-text-primary">
-                    {p.nrr.toFixed(1)}%
+                  <td
+                    className={cn(
+                      "px-4 py-3 font-mono text-sm",
+                      !p.nrrAvailable
+                        ? "text-text-muted"
+                        : p.nrr >= 100
+                          ? "text-positive"
+                          : "text-negative"
+                    )}
+                    title={
+                      p.nrrAvailable
+                        ? undefined
+                        : "Portefeuille vide ce mois — le NRR n'est pas calculable, ce n'est pas 0 %."
+                    }
+                  >
+                    {p.nrrAvailable ? `${p.nrr.toFixed(1)} %` : "n/a"}
                   </td>
                   <td className="px-4 py-3 font-mono text-sm text-positive">
                     {formatCurrency(p.upsellThisMonth, true)}

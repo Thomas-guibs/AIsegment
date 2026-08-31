@@ -12,6 +12,7 @@ import {
   Users,
   TrendingUp,
   BarChart3,
+  ShieldAlert,
   ChevronLeft,
   ChevronRight,
   Zap,
@@ -25,6 +26,7 @@ const navigation = [
   { name: "Renouvellements", href: "/renewals", icon: CalendarClock },
   { name: "Portefeuille", href: "/portfolio", icon: Users },
   { name: "Tendances", href: "/trends", icon: TrendingUp },
+  { name: "Audit", href: "/audit", icon: ShieldAlert },
 ]
 
 export function Sidebar() {

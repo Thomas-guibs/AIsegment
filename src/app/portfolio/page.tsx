@@ -6,43 +6,45 @@ import { Header } from "@/components/layout/Header"
 import { KpiCard, KpiCardSkeleton } from "@/components/charts/KpiCard"
 import { DonutChart } from "@/components/charts/DonutChart"
 import { PortfolioTable } from "@/components/tables/PortfolioTable"
-import { useFetch, useGlobalFilters } from "@/lib/hooks"
+import { useFetch } from "@/lib/hooks"
 import type { Company, Deal, CsmPortfolio } from "@/lib/types"
+import { formatNrr, type MetricsResponse } from "@/lib/engine/client-types"
 import {
   CSM_TEAM,
   CUSTOMER_STAGE_CATEGORIES,
   STAGE_CATEGORY_COLORS,
   STAGE_CATEGORY_LABELS,
-  ATTRIBUTION,
   ACTIVE_STAGE_IDS,
   type StageCategory,
 } from "@/lib/constants"
-import { cn, formatCurrency, formatDateFR } from "@/lib/utils"
+import { cn, formatCurrency } from "@/lib/utils"
 
 function PortfolioContent() {
   const { data: companiesData, loading: compLoading } = useFetch<{ companies: Company[] }>("/api/companies")
-  const { data: dealsData, loading: dealsLoading } = useFetch<{ deals: Deal[] }>("/api/deals")
   const { data: pipelineData, loading: pipeLoading } = useFetch<{ deals: Deal[] }>("/api/pipeline")
+  // MRR, NRR and movements come from the engine — read point-in-time at the 1st
+  // of the month, with churned accounts already out. Never re-derived here.
+  const { data: metrics, loading: metricsLoading } = useFetch<MetricsResponse>("/api/metrics", {
+    months: "1",
+  })
   const [selectedCsm, setSelectedCsm] = useState<string | null>(null)
 
-  const loading = compLoading || dealsLoading || pipeLoading
+  const loading = compLoading || pipeLoading || metricsLoading
   const companies = companiesData?.companies ?? []
-  const movements = dealsData?.deals ?? []
   const pipelineDeals = pipelineData?.deals ?? []
 
   // Build portfolios per CSM
   const portfolios: CsmPortfolio[] = CSM_TEAM.map((csm) => {
-    const csmCompanies = companies.filter((c) => c.ownerId === csm.id)
     const csmDeals = pipelineDeals.filter((d) => d.ownerId === csm.id)
-    const csmMovements = movements.filter((d) => d.ownerId === csm.id)
 
-    const totalMrr = csmCompanies.reduce((sum, c) => sum + c.mrr, 0)
-    const upsellThisMonth = csmMovements
-      .filter((d) => d.attribution === ATTRIBUTION.UPSELL)
-      .reduce((sum, d) => sum + d.amount, 0)
-    const churnThisMonth = csmMovements
-      .filter((d) => d.attribution === ATTRIBUTION.CHURN)
-      .reduce((sum, d) => sum + d.amount, 0)
+    const engineCsm = metrics?.perCsm.find((c) => c.csmId === csm.id)
+    const thisMonth = engineCsm?.months[engineCsm.months.length - 1]
+
+    const totalMrr = thisMonth?.startingMrr ?? 0
+    const accountCount = thisMonth?.accountCount ?? 0
+    const upsellThisMonth = thisMonth?.upsell ?? 0
+    const churnThisMonth = thisMonth?.churn ?? 0
+    const nrr = thisMonth?.nrr ?? null
 
     // Stage breakdown
     const stageBreakdown: Record<StageCategory, number> = {
@@ -71,19 +73,17 @@ function PortfolioContent() {
       return rd >= now && rd <= in30Days
     }).length
 
-    // NRR (simplified)
-    const startMrr = totalMrr > 0 ? totalMrr - (upsellThisMonth - churnThisMonth) : 0
-    const nrr = startMrr > 0 ? ((startMrr + upsellThisMonth - churnThisMonth) / startMrr) * 100 : 100
-
     return {
       csmId: csm.id,
       csmName: csm.name,
       csmRole: csm.role,
       initials: csm.initials,
       color: csm.color,
-      accountCount: csmCompanies.length,
+      accountCount,
       totalMrr,
-      nrr,
+      // An empty portfolio has no NRR; the table renders the absence as such.
+      nrr: nrr ?? 0,
+      nrrAvailable: nrr != null,
       upsellThisMonth,
       churnThisMonth,
       renewals30d,
@@ -95,6 +95,9 @@ function PortfolioContent() {
   // Detail view for selected CSM
   const selectedPortfolio = selectedCsm ? portfolios.find((p) => p.csmId === selectedCsm) : null
   const selectedCompanies = selectedCsm ? companies.filter((c) => c.ownerId === selectedCsm) : []
+  const selectedMovements = selectedCsm
+    ? metrics?.perCsm.find((c) => c.csmId === selectedCsm)?.movements ?? []
+    : []
 
   return (
     <div className="p-6 space-y-6">
@@ -127,6 +130,19 @@ function PortfolioContent() {
                   {formatCurrency(p.totalMrr, true)}
                 </div>
                 <div className="flex gap-2 mt-1 text-xs">
+                  <span
+                    className={cn(
+                      "font-medium",
+                      !p.nrrAvailable
+                        ? "text-text-muted"
+                        : p.nrr >= 100
+                          ? "text-positive"
+                          : "text-negative"
+                    )}
+                    title="NRR du mois en cours — portefeuille lu au 1er, comptes churnés exclus"
+                  >
+                    NRR {formatNrr(p.nrrAvailable ? p.nrr : null)}
+                  </span>
                   <span className={cn(
                     "font-medium",
                     p.healthPercent >= 80 ? "text-positive" :
@@ -170,7 +186,45 @@ function PortfolioContent() {
             </div>
           </div>
 
+          {selectedMovements.length > 0 && (
+            <div className="mb-6">
+              <h4 className="text-xs font-medium text-text-secondary mb-2">
+                Mouvements du mois retenus par le calcul
+              </h4>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="border-b border-card-border">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-[10px] font-medium text-text-muted uppercase">Compte</th>
+                      <th className="px-4 py-2 text-left text-[10px] font-medium text-text-muted uppercase">Deal</th>
+                      <th className="px-4 py-2 text-left text-[10px] font-medium text-text-muted uppercase">Type</th>
+                      <th className="px-4 py-2 text-left text-[10px] font-medium text-text-muted uppercase">Date de réf.</th>
+                      <th className="px-4 py-2 text-right text-[10px] font-medium text-text-muted uppercase">Montant</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-card-border">
+                    {selectedMovements.map((mv) => (
+                      <tr key={mv.id} className="hover:bg-card-hover transition-colors">
+                        <td className="px-4 py-2 text-xs text-text-primary">{mv.accountName ?? "—"}</td>
+                        <td className="px-4 py-2 text-xs text-text-secondary">{mv.name}</td>
+                        <td className="px-4 py-2 text-xs text-text-muted capitalize">{mv.type}</td>
+                        <td className="px-4 py-2 text-xs font-mono text-text-muted">{mv.referenceDate ?? "—"}</td>
+                        <td className={cn(
+                          "px-4 py-2 text-xs font-mono text-right",
+                          mv.type === "upsell" ? "text-positive" : mv.type === "churn" ? "text-negative" : "text-warning"
+                        )}>
+                          {mv.type === "upsell" ? "+" : "-"}{formatCurrency(mv.amount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
+            <h4 className="text-xs font-medium text-text-secondary mb-2">Comptes du portefeuille</h4>
             <table className="w-full">
               <thead className="border-b border-card-border">
                 <tr>

@@ -129,6 +129,16 @@ export function computePortfolioMonth(
     if (csmScope && !csmScope.has(csmId)) continue
 
     // Condition 3 — MRR at T is strictly above the threshold.
+    // A MRR history that does not reach T is not "a MRR of zero": the account
+    // would drop out with no business rule having excluded it. Report it.
+    if (isTruncatedAt(account.mrr, observedIso)) {
+      truncated.push({
+        accountId: account.id,
+        accountName: account.name,
+        earliest: account.mrr.earliest,
+      })
+      continue
+    }
     const mrr = valueAt(account.mrr, observedIso) ?? 0
     if (!(mrr > config.minMrrUnderManagement)) continue
 

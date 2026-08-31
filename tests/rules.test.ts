@@ -420,3 +420,30 @@ describe("§10 manual corrections", () => {
     expect(result.diagnostics.overrides.applied[0].author).toBe("thomas")
   })
 })
+
+describe("§9 nothing disappears in silence", () => {
+  it("reports an account whose MRR history does not reach the observed month", async () => {
+    // The CSM is known, but the MRR was only ever recorded from April onwards.
+    // Reading March must not silently treat that as a MRR of zero.
+    const late = account({
+      id: "late",
+      name: "Late history",
+      mrr: [["2026-04-01T00:00:00Z", 800]],
+      csm: [["2025-01-01T00:00:00Z", CSM_A]],
+      phase: "Run",
+      firstPaymentDate: "2025-01-01",
+    })
+
+    const result = await computeMetrics({
+      snapshot: snapshot([late], []),
+      months: ["2026-03", "2026-05"],
+      csmIds: [CSM_A],
+    })
+
+    expect(result.perCsm[0].months[0].startingMrr).toBe(0)
+    expect(result.perCsm[0].months[1].startingMrr).toBe(800)
+    expect(result.diagnostics.truncatedHistory).toHaveLength(1)
+    expect(result.diagnostics.truncatedHistory[0].accountName).toBe("Late history")
+    expect(result.diagnostics.truncatedHistory[0].month).toBe("2026-03")
+  })
+})

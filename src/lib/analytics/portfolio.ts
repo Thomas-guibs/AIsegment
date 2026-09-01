@@ -15,7 +15,7 @@
 import type { Deal } from "../types"
 import type { CompanyHistory } from "../hubspot/history"
 import { valueAt } from "../hubspot/history"
-import { ATTRIBUTION, movementDate, isRetainedMovement } from "../constants"
+import { ATTRIBUTION, SALES_STAGES, movementDate, isRetainedMovement } from "../constants"
 
 // Phases signifiant "parti" (spec §4 signal 2)
 export const CHURNED_PHASES = ["churn"]
@@ -82,6 +82,7 @@ export interface Diagnostics {
   accountsExitedByPhaseOnly: string[]  // phase=churn but no counted churn deal
   accountsRetainedWithChurn: string[]  // veto applied — likely mis-attributed downsell
   accountsInvisibleTruncatedHistory: string[]  // history doesn't reach T
+  accountsMrrFromDeals: string[]   // total_revenue history empty at T → MRR reconstructed from deals
 }
 
 export function newDiagnostics(): Diagnostics {
@@ -94,7 +95,56 @@ export function newDiagnostics(): Diagnostics {
     accountsExitedByPhaseOnly: [],
     accountsRetainedWithChurn: [],
     accountsInvisibleTruncatedHistory: [],
+    accountsMrrFromDeals: [],
   }
+}
+
+// -----------------------------------------------------------------------------
+// MRR fallback — computed from deals when total_revenue history is empty at T.
+//
+// Loyoly's HubSpot instance does NOT keep `total_revenue` up to date (a known
+// trap listed in CALCUL.md §8). Per §2 warning "l'historique peut être
+// tronqué", we reconstruct MRR at T from the deals:
+//
+//   MRR(T) = Σ new business (paymentDate < T)
+//          + Σ upsell        (paymentDate < T)
+//          − Σ churn         (operationDate < T)
+//          − Σ downsell      (operationDate < T)
+//
+// Only deals in retained stages (closedlost/won, 143474109, 1220133077) are
+// counted — same filter as isRetainedMovement (§5), broadened to include the
+// new-business acquisitions that landed the initial MRR.
+// -----------------------------------------------------------------------------
+const RETAINED_STAGES = new Set<string>([
+  SALES_STAGES.CLOSED_WON,       // "closedlost" — actually Closed Won
+  SALES_STAGES.PAIEMENT_RECU,    // "143474109"
+  SALES_STAGES.CHURN_DOWNSELL,   // "1220133077"
+])
+
+export function computeMrrFromDeals(deals: Deal[], t: string): number {
+  const tDate = t.slice(0, 10)
+  let mrr = 0
+  for (const d of deals) {
+    if (!RETAINED_STAGES.has(d.stage)) continue
+    if (!d.amount) continue
+    let refDate: string | null = null
+    let sign = 1
+    if (d.attribution === ATTRIBUTION.UPSELL) {
+      refDate = d.paymentDate
+    } else if (
+      d.attribution === ATTRIBUTION.CHURN ||
+      d.attribution === ATTRIBUTION.DOWNSELL
+    ) {
+      refDate = d.operationDate
+      sign = -1
+    } else {
+      // New business: paymentDate first, fall back to operationDate.
+      refDate = d.paymentDate ?? d.operationDate
+    }
+    if (!refDate || refDate >= tDate) continue
+    mrr += sign * Math.abs(d.amount)
+  }
+  return mrr
 }
 
 // Spec §4: an account has exited the portfolio at T iff any exit signal fires
@@ -165,8 +215,19 @@ export function mrrUnderManagement(
     }
     // 2. CSM in scope
     if (csmFilter && csm !== csmFilter) continue
-    // 3. MRR > 0 at T (from total_revenue history)
-    const mrr = valueAt(c.mrr, t) ?? 0
+    // 3. MRR > 0 at T — total_revenue history first, deal-derived fallback.
+    // Loyoly's HubSpot leaves total_revenue empty (CALCUL.md §8 known trap);
+    // §2 explicitly allows reconstruction when history is truncated at T.
+    const companyDeals = companyDealsMap.get(c.id) ?? []
+    const mrrFromHist = valueAt(c.mrr, t)
+    let mrr = mrrFromHist ?? 0
+    if (mrr <= 0) {
+      const mrrFromDeals = computeMrrFromDeals(companyDeals, t)
+      if (mrrFromDeals > 0) {
+        mrr = mrrFromDeals
+        diagnostics?.accountsMrrFromDeals.push(c.id)
+      }
+    }
     if (mrr <= 0) {
       diagnostics?.excludedZeroMrr.push(c.id)
       continue
@@ -179,7 +240,6 @@ export function mrrUnderManagement(
       continue
     }
     // 5. Not exited (§4)
-    const companyDeals = companyDealsMap.get(c.id) ?? []
     if (hasExited(c, companyDeals, t, mrr)) {
       diagnostics?.excludedExited.push(c.id)
       // Sub-signal: exited by phase only (no counted churn deal)

@@ -57,6 +57,7 @@ interface Diagnostics {
   accountsExitedByPhaseOnly: number
   accountsRetainedWithChurn: number
   accountsInvisibleTruncatedHistory: number
+  accountsMrrFromDeals: number
 }
 
 interface DashboardResponse {
@@ -261,6 +262,9 @@ function DiagnosticsBanner({ d }: { d: Diagnostics }) {
         )}
         {d.accountsInvisibleTruncatedHistory > 0 && (
           <DiagRow label="⚠ Historique tronqué (§2)" value={d.accountsInvisibleTruncatedHistory} />
+        )}
+        {d.accountsMrrFromDeals > 0 && (
+          <DiagRow label="ℹ MRR reconstruit depuis les deals" value={d.accountsMrrFromDeals} />
         )}
       </div>
     </details>

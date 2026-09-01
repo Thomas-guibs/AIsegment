@@ -489,6 +489,7 @@ export async function GET(request: NextRequest) {
       accountsExitedByPhaseOnly: latestDiag.accountsExitedByPhaseOnly.length,
       accountsRetainedWithChurn: latestDiag.accountsRetainedWithChurn.length,
       accountsInvisibleTruncatedHistory: latestDiag.accountsInvisibleTruncatedHistory.length,
+      accountsMrrFromDeals: latestDiag.accountsMrrFromDeals.length,
     }
 
     return NextResponse.json({

@@ -39,6 +39,7 @@ export interface HubSpotCompany {
     total_revenue: string | null
     plan: string | null
     client_revenue_tiers: string | null
+    code_pays_region: string | null
     hubspot_owner_id: string | null
     proprietaire_de_l_entreprise__csm_: string | null
     lifecyclestage: string | null
@@ -101,6 +102,7 @@ export interface Deal {
   companyId?: string
   companyName?: string
   companyRevenueTier?: string
+  companyCountry?: string
 }
 
 export interface Company {
@@ -110,6 +112,7 @@ export interface Company {
   mrr: number // total_revenue from HubSpot ("Chiffre d'affaire total")
   plan: string | null
   revenueTier: string | null // client_revenue_tiers (custom HubSpot property)
+  country: string | null // code_pays_region (FR / GB / ES)
   ownerId: string | null
   lifecycleStage: string | null
   customerStage: string | null // phase_du_client

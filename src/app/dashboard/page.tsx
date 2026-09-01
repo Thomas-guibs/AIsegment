@@ -1,207 +1,350 @@
 "use client"
 
-import { Suspense } from "react"
+import { Suspense, useMemo, useState } from "react"
 import { Header } from "@/components/layout/Header"
-import { KpiCard, KpiCardSkeleton } from "@/components/charts/KpiCard"
-import { BarChartComponent } from "@/components/charts/BarChart"
-import { LineChartComponent } from "@/components/charts/LineChart"
-import { MiniDonut } from "@/components/charts/DonutChart"
-import { DealsTable, DealsTableSkeleton } from "@/components/tables/DealsTable"
 import { useFetch } from "@/lib/hooks"
-import type { DashboardKpis, Deal } from "@/lib/types"
-import { STAGE_CATEGORY_COLORS, STAGE_CATEGORY_LABELS, CHART_CSMS, type StageCategory } from "@/lib/constants"
-import { cn, formatCurrency } from "@/lib/utils"
 import { ErrorState } from "@/components/ui/ErrorState"
-import {
-  DollarSign,
-  Percent,
-  TrendingDown,
-  TrendingUp,
-  Layers,
-  CalendarClock,
-} from "lucide-react"
+import { formatCurrency, formatDateFR, cn } from "@/lib/utils"
+import { ChevronDown, ChevronRight, X, ExternalLink } from "lucide-react"
 
-interface NrrMonthData {
-  month: string
-  monthLabel: string
-  startingMrr: number
-  upsell: number
-  churn: number
-  downsell: number
-  nrr: number
+type PeriodType = "month" | "quarter" | "year"
+type CalcMethod = "booked" | "billed"
+type MetricKey = "nrr" | "grr" | "upsell" | "churn" | "downsell" | "renew"
+
+interface Cell {
+  value: number
+  volume?: number
+  pct?: number
+  dealIds: string[]
 }
 
-interface NrrTrendsResponse {
-  chartData: Record<string, unknown>[]
-  global: NrrMonthData[]
+interface Row {
+  id: string
+  label: string
+  perPeriod: Record<string, Cell>
 }
 
+interface MetricGroup {
+  total: Row
+  byCsm: Row[]
+  byTier: Row[]
+  byCountry: Row[]
+}
+
+interface DealBrief {
+  id: string
+  name: string
+  companyName: string
+  csmName: string
+  amount: number
+  attribution: string
+  stage: string
+  operationDate: string | null
+  paymentDate: string | null
+  renewalDate: string | null
+  country: string | null
+  tier: string | null
+}
+
+interface DashboardResponse {
+  periods: Array<{ key: string; label: string; startIso: string }>
+  periodType: PeriodType
+  calcMethod: CalcMethod
+  metrics: Record<MetricKey, MetricGroup>
+  deals: Record<string, DealBrief>
+}
+
+interface MetricSpec {
+  key: MetricKey
+  label: string
+  format: "pct" | "eur"
+  color?: string
+}
+
+const METRICS: MetricSpec[] = [
+  { key: "nrr", label: "NRR", format: "pct" },
+  { key: "grr", label: "GRR", format: "pct" },
+  { key: "upsell", label: "Upsell", format: "eur", color: "text-positive" },
+  { key: "churn", label: "Churn", format: "eur", color: "text-negative" },
+  { key: "downsell", label: "Downsell", format: "eur", color: "text-warning" },
+  { key: "renew", label: "Renouvellement", format: "pct" },
+]
+
+function fmtValue(cell: Cell, spec: MetricSpec): string {
+  if (spec.format === "pct") {
+    if (cell.pct === undefined || cell.pct === null) return "—"
+    return `${cell.pct.toFixed(1)}%`
+  }
+  return formatCurrency(cell.value, true)
+}
+
+function fmtVolume(cell: Cell): string | null {
+  if (cell.volume === undefined || cell.volume === 0) return null
+  return `${cell.volume} deal${cell.volume > 1 ? "s" : ""}`
+}
 
 function DashboardContent() {
-  const { data: kpis, loading: kpisLoading, error: kpisError, refetch: refetchKpis } = useFetch<DashboardKpis>("/api/kpis")
-  const { data: dealsData, loading: dealsLoading, error: dealsError, refetch: refetchDeals } = useFetch<{ deals: Deal[] }>("/api/deals")
-  const { data: nrrTrends, loading: nrrLoading, error: nrrError, refetch: refetchNrr } = useFetch<NrrTrendsResponse>("/api/nrr-trends")
+  const [periodType, setPeriodType] = useState<PeriodType>("month")
+  const [calcMethod, setCalcMethod] = useState<CalcMethod>("billed")
+  const [expanded, setExpanded] = useState<Set<MetricKey>>(new Set())
+  const [drawer, setDrawer] = useState<{ title: string; dealIds: string[] } | null>(null)
 
-  const criticalError = kpisError && dealsError && nrrError
-  if (criticalError) {
-    return (
-      <div className="p-6">
-        <ErrorState
-          message="Impossible de charger le dashboard. Vérifie que le token HubSpot est configuré."
-          onRetry={() => { refetchKpis(); refetchDeals(); refetchNrr() }}
-        />
-      </div>
-    )
+  const { data, loading, error, refetch } = useFetch<DashboardResponse>("/api/dashboard", {
+    periodType,
+    calcMethod,
+    months: "12",
+  })
+
+  if (error && !loading) {
+    return <div className="p-6"><ErrorState message="Impossible de charger le dashboard" onRetry={refetch} /></div>
   }
 
+  const periodsReversed = useMemo(() => (data?.periods ?? []).slice().reverse(), [data?.periods])
+
+  const toggleMetric = (k: MetricKey) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      return next
+    })
+  }
+
+  const openDrawer = (title: string, dealIds: string[]) => setDrawer({ title, dealIds })
+
   return (
-    <div className="p-6 space-y-6">
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {kpisLoading || !kpis ? (
-          Array.from({ length: 6 }).map((_, i) => <KpiCardSkeleton key={i} />)
-        ) : (
-          <>
-            <KpiCard kpi={kpis.mrrUnderManagement} icon={<DollarSign className="w-4 h-4" />} />
-            <KpiCard kpi={kpis.nrr} icon={<Percent className="w-4 h-4" />} />
-            <KpiCard kpi={kpis.churnRate} icon={<TrendingDown className="w-4 h-4" />} />
-            <KpiCard kpi={kpis.upsellRevenue} icon={<TrendingUp className="w-4 h-4" />} />
-            <KpiCard kpi={kpis.activeDeals} icon={<Layers className="w-4 h-4" />}>
-              <MiniDonut
-                data={Object.entries(kpis.activeDeals.breakdown)
-                  .filter(([, v]) => v > 0)
-                  .map(([cat, v]) => ({
-                    name: STAGE_CATEGORY_LABELS[cat as StageCategory],
-                    value: v,
-                    color: STAGE_CATEGORY_COLORS[cat as StageCategory],
-                  }))}
-              />
-            </KpiCard>
-            <KpiCard
-              kpi={kpis.renewals30d}
-              icon={<CalendarClock className="w-4 h-4" />}
-              warning={kpis.renewals30d.value > 5}
-              danger={kpis.renewals30d.value > 10}
-            />
-          </>
-        )}
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="card">
-          <h3 className="text-sm font-medium text-text-secondary mb-4">
-            Upsell vs Churn vs Downsell (6 mois)
-          </h3>
-          {nrrLoading ? (
-            <div className="skeleton h-[280px]" />
-          ) : nrrTrends?.global ? (
-            <BarChartComponent
-              data={nrrTrends.global.map((m) => ({
-                monthLabel: m.monthLabel,
-                upsell: m.upsell,
-                churn: m.churn,
-                downsell: m.downsell,
-              }))}
-              series={[
-                { key: "upsell", label: "Upsell", color: "#22C55E" },
-                { key: "churn", label: "Churn", color: "#EF4444" },
-                { key: "downsell", label: "Downsell", color: "#F59E0B" },
-              ]}
-              xKey="monthLabel"
-              stacked
-              height={280}
-            />
-          ) : nrrError ? (
-            <ErrorState message="Impossible de charger les tendances NRR" onRetry={refetchNrr} />
-          ) : (
-            <div className="flex items-center justify-center h-[280px] text-text-muted text-sm">
-              Aucune donnée disponible
-            </div>
-          )}
-        </div>
-
-        <div className="card">
-          <h3 className="text-sm font-medium text-text-secondary mb-4">
-            NRR par CSM — Rolling 6 mois
-          </h3>
-          {nrrLoading ? (
-            <div className="skeleton h-[280px]" />
-          ) : nrrTrends?.chartData && nrrTrends.chartData.length > 0 ? (
-            <LineChartComponent
-              data={nrrTrends.chartData}
-              series={[
-                { key: "Global", label: "Global", color: "var(--color-text-primary)", dashed: true },
-                ...CHART_CSMS.map((csm) => ({
-                  key: csm.name.split(" ")[0],
-                  label: csm.name.split(" ")[0],
-                  color: csm.color,
-                })),
-              ]}
-              xKey="monthLabel"
-              height={280}
-              referenceLine={{ y: 100, label: "100%", color: "#64748B" }}
-            />
-          ) : nrrError ? (
-            <ErrorState message="Impossible de charger les données NRR" onRetry={refetchNrr} />
-          ) : (
-            <div className="flex items-center justify-center h-[280px] text-text-muted text-sm">
-              Aucune donnée NRR disponible
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Monthly detail table */}
-      {!nrrLoading && nrrTrends?.global && (
-        <div className="card p-0 overflow-hidden">
-          <div className="px-4 py-3 border-b border-card-border">
-            <h3 className="text-sm font-medium text-text-secondary">Detail mensuel</h3>
+    <div className="p-6 space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-text-muted">Période:</span>
+          <div className="flex items-center gap-1 bg-card rounded-lg p-0.5 border border-card-border">
+            {(["month", "quarter", "year"] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriodType(p)}
+                className={cn(
+                  "px-3 py-1.5 text-xs rounded-md transition-colors font-medium",
+                  periodType === p ? "bg-accent text-white" : "text-text-secondary hover:text-text-primary"
+                )}
+              >
+                {p === "month" ? "Mois" : p === "quarter" ? "Trimestre" : "Année"}
+              </button>
+            ))}
           </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-text-muted">Méthode:</span>
+          <div className="flex items-center gap-1 bg-card rounded-lg p-0.5 border border-card-border">
+            {(["billed", "booked"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setCalcMethod(m)}
+                className={cn(
+                  "px-3 py-1.5 text-xs rounded-md transition-colors font-medium",
+                  calcMethod === m ? "bg-accent text-white" : "text-text-secondary hover:text-text-primary"
+                )}
+                title={
+                  m === "billed"
+                    ? "Upsell par date de paiement, Churn/Downsell par operation date"
+                    : "Tous les mouvements par operation date"
+                }
+              >
+                {m === "billed" ? "Billed" : "Booked"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {loading || !data ? (
+        <div className="card skeleton h-[500px]" />
+      ) : (
+        <div className="card p-0 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-row-alt">
-                <tr>
-                  <th className="px-4 py-2.5 text-left text-2xs text-text-muted font-medium">Mois</th>
-                  <th className="px-4 py-2.5 text-right text-2xs text-text-muted font-medium">MRR Debut</th>
-                  <th className="px-4 py-2.5 text-right text-2xs text-text-muted font-medium">Upsell</th>
-                  <th className="px-4 py-2.5 text-right text-2xs text-text-muted font-medium">Churn</th>
-                  <th className="px-4 py-2.5 text-right text-2xs text-text-muted font-medium">Downsell</th>
-                  <th className="px-4 py-2.5 text-right text-2xs text-text-muted font-medium">Net</th>
-                  <th className="px-4 py-2.5 text-right text-2xs text-text-muted font-medium">NRR</th>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-card-border bg-background/50">
+                  <th className="text-left px-4 py-3 text-xs font-medium text-text-muted sticky left-0 bg-background/50 z-10 min-w-[220px]">
+                    Métrique
+                  </th>
+                  {periodsReversed.map((p) => (
+                    <th key={p.key} className="text-right px-4 py-3 text-xs font-medium text-text-muted whitespace-nowrap">
+                      {p.label}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-card-border">
-                {nrrTrends.global.map((m) => {
-                  const net = m.upsell - m.churn - m.downsell
-                  return (
-                    <tr key={m.month} className="hover:bg-card-hover transition-colors">
-                      <td className="px-4 py-2.5 text-[13px] font-medium text-text-primary">{m.monthLabel}</td>
-                      <td className="px-4 py-2.5 text-[13px] font-mono text-text-secondary text-right">{formatCurrency(m.startingMrr, true)}</td>
-                      <td className="px-4 py-2.5 text-[13px] font-mono text-positive text-right">{m.upsell > 0 ? `+${formatCurrency(m.upsell, true)}` : "—"}</td>
-                      <td className="px-4 py-2.5 text-[13px] font-mono text-negative text-right">{m.churn > 0 ? `-${formatCurrency(m.churn, true)}` : "—"}</td>
-                      <td className="px-4 py-2.5 text-[13px] font-mono text-warning text-right">{m.downsell > 0 ? `-${formatCurrency(m.downsell, true)}` : "—"}</td>
-                      <td className={cn("px-4 py-2.5 text-[13px] font-mono font-medium text-right", net >= 0 ? "text-positive" : "text-negative")}>{formatCurrency(net, true)}</td>
-                      <td className={cn("px-4 py-2.5 text-[13px] font-mono font-semibold text-right", m.nrr >= 100 ? "text-positive" : "text-negative")}>{m.nrr.toFixed(1)}%</td>
-                    </tr>
-                  )
-                })}
+                {METRICS.map((spec) => (
+                  <MetricRows
+                    key={spec.key}
+                    spec={spec}
+                    group={data.metrics[spec.key]}
+                    periods={periodsReversed}
+                    expanded={expanded.has(spec.key)}
+                    onToggle={() => toggleMetric(spec.key)}
+                    onOpenDrawer={openDrawer}
+                  />
+                ))}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* Recent transactions */}
-      <div>
-        <h3 className="text-sm font-medium text-text-secondary mb-3">
-          Transactions recentes
-        </h3>
-        {dealsLoading ? (
-          <DealsTableSkeleton />
-        ) : (
-          <DealsTable deals={dealsData?.deals ?? []} />
-        )}
+      {drawer && data && (
+        <Drawer
+          title={drawer.title}
+          deals={drawer.dealIds.map((id) => data.deals[id]).filter(Boolean)}
+          onClose={() => setDrawer(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function MetricRows({
+  spec,
+  group,
+  periods,
+  expanded,
+  onToggle,
+  onOpenDrawer,
+}: {
+  spec: MetricSpec
+  group: MetricGroup
+  periods: Array<{ key: string; label: string }>
+  expanded: boolean
+  onToggle: () => void
+  onOpenDrawer: (title: string, dealIds: string[]) => void
+}) {
+  const rows: Array<{ row: Row; kind: "total" | "csm" | "tier" | "country"; groupLabel: string }> = []
+  rows.push({ row: group.total, kind: "total", groupLabel: "Total" })
+  if (expanded) {
+    for (const r of group.byCsm) rows.push({ row: r, kind: "csm", groupLabel: "CSM" })
+    for (const r of group.byTier) rows.push({ row: r, kind: "tier", groupLabel: "Tier" })
+    for (const r of group.byCountry) rows.push({ row: r, kind: "country", groupLabel: "Pays" })
+  }
+
+  return (
+    <>
+      {rows.map((entry, idx) => {
+        const isTotal = entry.kind === "total"
+        return (
+          <tr key={`${spec.key}-${entry.row.id}-${idx}`} className={cn(isTotal ? "font-semibold" : "text-text-secondary")}>
+            <td className={cn("px-4 py-2.5 sticky left-0 bg-card z-10", !isTotal && "pl-10")}>
+              <div className="flex items-center gap-2">
+                {isTotal && (
+                  <button onClick={onToggle} className="text-text-muted hover:text-text-primary">
+                    {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+                )}
+                <span className={isTotal ? "text-text-primary" : "text-text-secondary"}>
+                  {isTotal ? spec.label : `${spec.label} / ${entry.row.label}`}
+                </span>
+              </div>
+            </td>
+            {periods.map((p) => {
+              const cell = entry.row.perPeriod[p.key]
+              if (!cell) return <td key={p.key} className="text-right px-4 py-2.5 text-text-muted">—</td>
+              return (
+                <td key={p.key} className="text-right px-4 py-2.5">
+                  <div className="flex flex-col items-end gap-0.5">
+                    <span className={cn("font-mono text-[13px]", spec.color)}>
+                      {fmtValue(cell, spec)}
+                    </span>
+                    {spec.format === "eur" && fmtVolume(cell) && (
+                      <span className="text-2xs text-text-muted font-mono">{fmtVolume(cell)}</span>
+                    )}
+                    {spec.key === "renew" && cell.volume !== undefined && cell.volume > 0 && (
+                      <span className="text-2xs text-text-muted font-mono">
+                        {formatCurrency(cell.value, true)} · {cell.volume}
+                      </span>
+                    )}
+                    {cell.dealIds.length > 0 && (
+                      <button
+                        onClick={() =>
+                          onOpenDrawer(
+                            `${spec.label} · ${isTotal ? "Total" : entry.row.label} · ${p.label}`,
+                            cell.dealIds
+                          )
+                        }
+                        className="text-2xs text-accent hover:underline flex items-center gap-0.5"
+                      >
+                        Voir <ExternalLink className="w-2.5 h-2.5" />
+                      </button>
+                    )}
+                  </div>
+                </td>
+              )
+            })}
+          </tr>
+        )
+      })}
+    </>
+  )
+}
+
+function Drawer({
+  title,
+  deals,
+  onClose,
+}: {
+  title: string
+  deals: DealBrief[]
+  onClose: () => void
+}) {
+  const total = deals.reduce((s, d) => s + Math.abs(d.amount), 0)
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div
+        className="relative w-full max-w-[560px] bg-background-secondary h-full overflow-y-auto shadow-2xl border-l border-card-border"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 bg-background-secondary border-b border-card-border px-5 py-4 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+            <p className="text-2xs text-text-muted mt-0.5">
+              {deals.length} transactions — {formatCurrency(total, true)}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-text-muted hover:text-text-primary">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="divide-y divide-card-border">
+          {deals.length === 0 ? (
+            <div className="p-8 text-center text-sm text-text-muted">Aucune transaction</div>
+          ) : (
+            deals.map((d) => (
+              <div key={d.id} className="px-5 py-3 hover:bg-card-hover transition-colors">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-text-primary truncate">{d.name}</p>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                      {d.companyName} · {d.csmName}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1 text-2xs text-text-muted">
+                      {d.tier && <span className="px-1.5 py-0.5 rounded bg-card-hover">{d.tier}</span>}
+                      {d.country && <span className="px-1.5 py-0.5 rounded bg-card-hover">{d.country}</span>}
+                      {d.attribution && <span className="px-1.5 py-0.5 rounded bg-accent/15 text-accent">{d.attribution}</span>}
+                    </div>
+                    <div className="text-2xs text-text-muted mt-1 space-x-3">
+                      {d.operationDate && <span>Op: {formatDateFR(d.operationDate)}</span>}
+                      {d.paymentDate && <span>Pay: {formatDateFR(d.paymentDate)}</span>}
+                      {d.renewalDate && <span>Renew: {formatDateFR(d.renewalDate)}</span>}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-mono text-sm text-text-primary">{formatCurrency(d.amount, true)}</span>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   )
@@ -211,28 +354,11 @@ export default function DashboardPage() {
   return (
     <div>
       <Suspense>
-        <Header title="Dashboard" subtitle="Vue globale des KPIs Customer Success" />
+        <Header title="Dashboard" subtitle="Vue synthétique — NRR, GRR, mouvements, renouvellements" />
       </Suspense>
-      <Suspense fallback={<DashboardSkeleton />}>
+      <Suspense>
         <DashboardContent />
       </Suspense>
-    </div>
-  )
-}
-
-function DashboardSkeleton() {
-  return (
-    <div className="p-6 space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <KpiCardSkeleton key={i} />
-        ))}
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="card h-[340px] skeleton" />
-        <div className="card h-[340px] skeleton" />
-      </div>
-      <DealsTableSkeleton />
     </div>
   )
 }

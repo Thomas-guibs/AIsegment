@@ -206,12 +206,6 @@ export const CSM_ATTRIBUTIONS = [
 
 // -----------------------------------------------------------------------------
 // Stages retained per movement type (spec §5)
-//
-// A movement is only counted at these stages (its "won" states). Deals in
-// earlier stages are legitimate WIP, not anomalies — they're filtered silently.
-//
-// Note: "closedlost" is inverted-named — it's actually the Closed Won stage.
-// See SALES_STAGES comment.
 // -----------------------------------------------------------------------------
 
 export const UPSELL_STAGES: string[] = [
@@ -227,11 +221,6 @@ export const CHURN_DOWNSELL_STAGES: string[] = [
 
 // -----------------------------------------------------------------------------
 // Date used to attribute a movement to a month (spec §5)
-//
-// - Upsell: date_de_paiement (payment is when the upsell is acquired)
-// - Downsell/Churn: date_de_prise_en_compte (operation date — loss recorded)
-//
-// closeDate / createdAt are NOT used as fallbacks: no reference date = anomaly.
 // -----------------------------------------------------------------------------
 
 export function movementDate(deal: { attribution: string | null; paymentDate: string | null; operationDate: string | null }): string | null {
@@ -245,16 +234,68 @@ export function movementStages(attribution: string | null): string[] | null {
   return null
 }
 
-// A movement is retained if:
-//   1. its stage is one of the "won" stages for its type
-//   2. its reference date is present (payment for upsell, operation for churn/downsell)
-//   3. its amount is non-zero
 export function isRetainedMovement(deal: { attribution: string | null; stage: string; paymentDate: string | null; operationDate: string | null; amount: number }): boolean {
   const stages = movementStages(deal.attribution)
   if (!stages || !stages.includes(deal.stage)) return false
   if (!movementDate(deal)) return false
   if (deal.amount === 0) return false
   return true
+}
+
+// -----------------------------------------------------------------------------
+// Booked vs Billed — dashboard calculation modes
+//
+// Booked: all movements (upsell/churn/downsell) bucketed by operationDate
+// Billed: upsell by paymentDate, churn/downsell by operationDate
+//         (this is the default — matches spec §5)
+// -----------------------------------------------------------------------------
+
+export type CalcMethod = "booked" | "billed"
+
+export function movementDateFor(
+  deal: { attribution: string | null; paymentDate: string | null; operationDate: string | null },
+  method: CalcMethod
+): string | null {
+  if (method === "booked") return deal.operationDate
+  // billed: upsell by payment, churn/downsell by operation (default spec §5)
+  return movementDate(deal)
+}
+
+// -----------------------------------------------------------------------------
+// Countries / Regions (spec: FR / GB / ES from `code_pays_region`)
+// -----------------------------------------------------------------------------
+
+export const COUNTRIES = ["FR", "GB", "ES"] as const
+export type Country = (typeof COUNTRIES)[number]
+
+export function normalizeCountry(raw: string | null | undefined): Country | null {
+  if (!raw) return null
+  const v = raw.trim().toUpperCase()
+  if (v === "FR" || v === "UK" || v === "GB" || v === "ES") {
+    // "UK" label sometimes appears in HubSpot data even though the ISO code is GB
+    if (v === "UK") return "GB"
+    return v as Country
+  }
+  return null
+}
+
+// -----------------------------------------------------------------------------
+// Tiers (customer_revenue_tiers)
+// Values expected: "T1", "T2", "T3", "T4" (or variants).
+// -----------------------------------------------------------------------------
+
+export const TIERS = ["T1", "T2", "T3", "T4"] as const
+export type Tier = (typeof TIERS)[number]
+
+export function normalizeTier(raw: string | null | undefined): Tier | null {
+  if (!raw) return null
+  const v = raw.trim().toUpperCase()
+  // Match "T1", "TIER 1", "1", etc.
+  if (v.includes("1")) return "T1"
+  if (v.includes("2")) return "T2"
+  if (v.includes("3")) return "T3"
+  if (v.includes("4")) return "T4"
+  return null
 }
 
 // -----------------------------------------------------------------------------
@@ -345,6 +386,7 @@ export const COMPANY_PROPERTIES = [
   "total_revenue",
   "plan",
   "client_revenue_tiers",
+  "code_pays_region",
   "hubspot_owner_id",
   "proprietaire_de_l_entreprise__csm_",
   "lifecyclestage",

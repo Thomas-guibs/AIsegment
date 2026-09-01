@@ -7,19 +7,19 @@ function getToken(): string | null {
   return process.env.INTERCOM_ACCESS_TOKEN ?? null
 }
 
-async function intercomFetch<T>(endpoint: string, body?: unknown): Promise<T> {
+async function intercomFetch<T>(endpoint: string, options?: { method?: string; body?: unknown }): Promise<T> {
   const token = getToken()
   if (!token) throw new Error("INTERCOM_ACCESS_TOKEN not configured")
 
   const response = await fetch(`${INTERCOM_BASE_URL}${endpoint}`, {
-    method: body ? "POST" : "GET",
+    method: options?.method ?? "GET",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       Accept: "application/json",
       "Intercom-Version": "2.11",
     },
-    ...(body ? { body: JSON.stringify(body) } : {}),
+    ...(options?.body ? { body: JSON.stringify(options.body) } : {}),
   })
 
   if (!response.ok) {
@@ -30,49 +30,67 @@ async function intercomFetch<T>(endpoint: string, body?: unknown): Promise<T> {
   return response.json()
 }
 
-// Search for a company in Intercom by domain
-export async function findIntercomCompany(domain: string): Promise<{ id: string; name: string } | null> {
-  if (!domain || !getToken()) return null
+// Search Intercom contacts by email domain, then get their conversations
+export async function fetchIntercomTickets(companyName: string, domain?: string | null): Promise<IntercomTicket[]> {
+  if (!getToken()) return []
+  if (!companyName && !domain) return []
 
-  const cacheKey = `intercom_company_${domain}`
-  const cached = getCached<{ id: string; name: string } | null>(cacheKey)
-  if (cached !== null) return cached
-
-  try {
-    const response = await intercomFetch<{
-      data: Array<{ id: string; name: string; company_id: string; website: string }>
-      total_count: number
-    }>("/companies", undefined)
-
-    // Search through results for matching domain
-    // Intercom list endpoint — we'll scroll through to find the match
-    // For better perf, use scroll API or search by company_id if synced
-    const companies = response.data ?? []
-    const match = companies.find(
-      (c) =>
-        c.website?.includes(domain) ||
-        c.name?.toLowerCase().includes(domain.split(".")[0].toLowerCase())
-    )
-
-    const result = match ? { id: match.id, name: match.name } : null
-    setCache(cacheKey, result)
-    return result
-  } catch {
-    return null
-  }
-}
-
-// Fetch open conversations for a company by searching contacts
-export async function fetchIntercomTickets(domain: string): Promise<IntercomTicket[]> {
-  if (!domain || !getToken()) return []
-
-  const cacheKey = `intercom_tickets_${domain}`
+  const cacheKey = `intercom_tickets_v2_${companyName}_${domain ?? ""}`
   const cached = getCached<IntercomTicket[]>(cacheKey)
   if (cached) return cached
 
   try {
-    // Search conversations that mention the domain or company name
-    const response = await intercomFetch<{
+    // Strategy: search contacts by email domain, then get their conversations
+    let contactIds: string[] = []
+
+    if (domain) {
+      // Search contacts whose email ends with @domain
+      const contactResponse = await intercomFetch<{
+        type: string
+        data: Array<{ id: string; email: string; name: string }>
+        total_count: number
+      }>("/contacts/search", {
+        method: "POST",
+        body: {
+          query: {
+            field: "email",
+            operator: "~",
+            value: `@${domain}`,
+          },
+          pagination: { per_page: 50 },
+        },
+      })
+      contactIds = (contactResponse.data ?? []).map((c) => c.id)
+    }
+
+    // If no contacts found by domain, try searching by company name in contact data
+    if (contactIds.length === 0 && companyName) {
+      const contactResponse = await intercomFetch<{
+        type: string
+        data: Array<{ id: string; email: string; name: string }>
+        total_count: number
+      }>("/contacts/search", {
+        method: "POST",
+        body: {
+          query: {
+            field: "name",
+            operator: "~",
+            value: companyName,
+          },
+          pagination: { per_page: 20 },
+        },
+      })
+      contactIds = (contactResponse.data ?? []).map((c) => c.id)
+    }
+
+    if (contactIds.length === 0) {
+      setCache(cacheKey, [])
+      return []
+    }
+
+    // Search conversations for these contacts
+    const conversationResponse = await intercomFetch<{
+      type: string
       conversations: Array<{
         id: string
         title: string | null
@@ -84,16 +102,22 @@ export async function fetchIntercomTickets(domain: string): Promise<IntercomTick
       }>
       total_count: number
     }>("/conversations/search", {
-      query: {
-        operator: "AND",
-        value: [
-          { field: "source.body", operator: "~", value: domain.split(".")[0] },
-        ],
+      method: "POST",
+      body: {
+        query: {
+          operator: "OR",
+          value: contactIds.slice(0, 25).map((id) => ({
+            field: "contact_ids",
+            operator: "=",
+            value: id,
+          })),
+        },
+        pagination: { per_page: 30 },
+        sort: { field: "updated_at", order: "desc" },
       },
-      pagination: { per_page: 20 },
     })
 
-    const tickets: IntercomTicket[] = (response.conversations ?? []).map((c) => ({
+    const tickets: IntercomTicket[] = (conversationResponse.conversations ?? []).map((c) => ({
       id: c.id,
       title: c.source?.subject ?? c.title ?? "Sans titre",
       state: c.state,
@@ -105,14 +129,14 @@ export async function fetchIntercomTickets(domain: string): Promise<IntercomTick
 
     setCache(cacheKey, tickets)
     return tickets
-  } catch {
-    // Intercom not configured or API error — return empty
+  } catch (err) {
+    console.error("Intercom fetch error:", err)
     return []
   }
 }
 
-// Count open tickets for a domain
-export async function countOpenTickets(domain: string): Promise<number> {
-  const tickets = await fetchIntercomTickets(domain)
+// Count open tickets
+export async function countOpenTickets(companyName: string, domain?: string | null): Promise<number> {
+  const tickets = await fetchIntercomTickets(companyName, domain)
   return tickets.filter((t) => t.state === "open").length
 }

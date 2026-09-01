@@ -14,6 +14,7 @@ export interface HubSpotDeal {
     hs_acv: string | null
     attribution: string | null
     renewall_date: string | null
+    renewall_strategy: string | null
     date_de_prise_en_compte: string | null
     closedate: string | null
     dealstage: string
@@ -34,10 +35,13 @@ export interface HubSpotCompany {
   id: string
   properties: {
     name: string | null
+    domain: string | null
     total_revenue: string | null
     plan: string | null
+    client_revenue_tiers: string | null
+    code_pays_region: string | null
     hubspot_owner_id: string | null
-    proprietaire_de_l_entreprise__csm_: string | null // Company owner (CSM)
+    proprietaire_de_l_entreprise__csm_: string | null
     lifecyclestage: string | null
     phase_du_client: string | null
     num_associated_deals: string | null
@@ -86,7 +90,9 @@ export interface Deal {
   acv: number
   attribution: string | null
   renewalDate: string | null
+  renewalStrategy: string | null
   operationDate: string | null
+  paymentDate: string | null
   closeDate: string | null
   stage: string
   pipeline: string
@@ -95,6 +101,8 @@ export interface Deal {
   lastModified: string | null
   companyId?: string
   companyName?: string
+  companyRevenueTier?: string
+  companyCountry?: string
 }
 
 export interface Company {
@@ -103,6 +111,8 @@ export interface Company {
   domain: string | null
   mrr: number // total_revenue from HubSpot ("Chiffre d'affaire total")
   plan: string | null
+  revenueTier: string | null // client_revenue_tiers (custom HubSpot property)
+  country: string | null // code_pays_region (FR / GB / ES)
   ownerId: string | null
   lifecycleStage: string | null
   customerStage: string | null // phase_du_client
@@ -126,6 +136,34 @@ export interface Company {
   accompagnement: string | null
   reasonChurn: string | null
   customerSituation: string | null
+  // Upsell enrichment signals
+  upsellSignals: UpsellSignals | null
+}
+
+export interface UpsellSignals {
+  parentCompany: string | null
+  parentSiren: string | null
+  siblingBrands: Array<{
+    name: string
+    siren: string
+    isClient: boolean
+    hubspotCompanyId?: string
+    isEcommerce?: boolean
+    platform?: string | null              // Shopify / PrestaShop / WooCommerce / Magento / BigCommerce / Shopware / Generic
+    fit?: "strong" | "partial" | "none"   // Loyoly fit based on platform detected
+    domain?: string | null                // Resolved domain (from Pappers or inferred)
+    role?: string
+    icpScore?: number      // 0-100 ICP fit score
+    icpSignals?: string[]  // signals that contribute to the score
+    excluded?: boolean
+    excludeReason?: string
+  }>
+  storesCount: number
+  languages: string[]
+  subsites: Array<{ lang: string; url: string }>
+  enrichedAt: string | null
+  score: number
+  grade: "hot" | "warm" | "cold"
 }
 
 export interface IntercomTicket {

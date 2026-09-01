@@ -132,7 +132,24 @@ export function parseNumber(value: string | null | undefined): number {
   return isNaN(parsed) ? 0 : parsed
 }
 
+// Normalize a HubSpot date/datetime value to an ISO string.
+// HubSpot returns either ISO ("2025-06-01T12:00:00.000Z" or "2025-06-01")
+// or epoch millis ("1717239600000") depending on the property and account
+// format. String comparisons ("2025-06-01" < "2026-09-01") only work on
+// ISO — a millis string collates lexicographically with anything, so we
+// normalize both shapes to ISO before returning.
 export function parseDate(value: string | null | undefined): string | null {
-  if (!value) return null
-  return value
+  if (value === null || value === undefined || value === "") return null
+  const s = String(value).trim()
+  if (!s) return null
+  // Epoch millis (all digits, 10+ chars)
+  if (/^\d{10,}$/.test(s)) {
+    const n = Number(s)
+    if (!Number.isNaN(n)) {
+      const d = new Date(n)
+      if (!Number.isNaN(d.getTime())) return d.toISOString()
+    }
+  }
+  // Already ISO or ISO-like — leave as is
+  return s
 }

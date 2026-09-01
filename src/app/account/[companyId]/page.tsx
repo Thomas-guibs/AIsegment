@@ -1,11 +1,11 @@
 "use client"
 
-import { Suspense } from "react"
+import { Suspense, useState } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
 import { Header } from "@/components/layout/Header"
 import { useFetch } from "@/lib/hooks"
-import type { AccountDetail } from "@/lib/types"
+import type { AccountDetail, UpsellSignals } from "@/lib/types"
 import { cn, formatCurrency, formatDateFR } from "@/lib/utils"
 import { getCsmName, ATTRIBUTION_COLORS, ATTRIBUTION_LABELS, SALES_STAGE_LABELS, CUSTOMER_PHASE_LABELS } from "@/lib/constants"
 import {
@@ -19,6 +19,12 @@ import {
   MessageSquare,
   Calendar,
   ExternalLink,
+  Sparkles,
+  Store,
+  Globe,
+  Building,
+  RefreshCw,
+  Flame,
 } from "lucide-react"
 
 function HealthBadge({ score, grade }: { score: number; grade: string }) {
@@ -125,6 +131,9 @@ function AccountContent() {
           ))}
         </div>
       </div>
+
+      {/* Upsell Signals */}
+      <UpsellSignalsCard companyId={company.id} signals={company.upsellSignals} />
 
       {/* Two columns: Deals + Tickets/Meetings */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -286,6 +295,311 @@ function MetricRow({ label, value }: { label: string; value: string }) {
     <div>
       <div className="text-xs text-text-muted">{label}</div>
       <div className="text-sm font-mono text-text-primary">{value}</div>
+    </div>
+  )
+}
+
+function UpsellSignalsCard({ companyId, signals: initialSignals }: { companyId: string; signals: UpsellSignals | null }) {
+  const [signals, setSignals] = useState<UpsellSignals | null>(initialSignals)
+  const [enriching, setEnriching] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [debug, setDebug] = useState<Record<string, unknown> | null>(null)
+
+  const handleEnrich = async () => {
+    setEnriching(true)
+    setError(null)
+    try {
+      const response = await fetch(`/api/account/${companyId}/enrich`, { method: "POST" })
+      const data = await response.json()
+      if (data.debug) setDebug(data.debug)
+      if (data.success && data.signals) {
+        setSignals(data.signals)
+      } else {
+        setError(data.error ?? "Enrichissement echoue")
+      }
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setEnriching(false)
+    }
+  }
+
+  if (!signals) {
+    return (
+      <div className="card">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles className="w-4 h-4 text-accent" />
+              <h3 className="text-sm font-medium text-text-secondary">Upsell Signals</h3>
+            </div>
+            <p className="text-xs text-text-muted">Ce compte n'a pas encore été enrichi.</p>
+          </div>
+          <button
+            onClick={handleEnrich}
+            disabled={enriching}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-accent text-white rounded-lg hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <RefreshCw className={cn("w-3 h-3", enriching && "animate-spin")} />
+            {enriching ? "Enrichissement..." : "Enrichir maintenant"}
+          </button>
+        </div>
+        {error && <p className="text-xs text-negative mt-2">{error}</p>}
+      </div>
+    )
+  }
+
+  const gradeColors = {
+    hot: "bg-negative/15 text-negative border-negative/30",
+    warm: "bg-warning/15 text-warning border-warning/30",
+    cold: "bg-card-hover text-text-muted border-card-border",
+  }
+
+  const gradeIcons = {
+    hot: <Flame className="w-3.5 h-3.5" />,
+    warm: <TrendingUp className="w-3.5 h-3.5" />,
+    cold: <Sparkles className="w-3.5 h-3.5" />,
+  }
+
+  const nonClientSiblings = signals.siblingBrands.filter((s) => !s.isClient)
+  const clientSiblings = signals.siblingBrands.filter((s) => s.isClient)
+
+  return (
+    <div className="card">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-accent" />
+          <h3 className="text-sm font-medium text-text-secondary">Upsell Signals</h3>
+          <div className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-semibold", gradeColors[signals.grade])}>
+            {gradeIcons[signals.grade]}
+            {signals.score}/100
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {signals.enrichedAt && (
+            <span className="text-2xs text-text-muted">
+              Enrichi le {formatDateFR(signals.enrichedAt)}
+            </span>
+          )}
+          <button
+            onClick={handleEnrich}
+            disabled={enriching}
+            className="flex items-center gap-1 px-2 py-1 text-2xs text-text-secondary hover:text-accent hover:bg-card-hover rounded-lg transition-colors disabled:opacity-50"
+            title="Rafraichir l'enrichissement"
+          >
+            <RefreshCw className={cn("w-3 h-3", enriching && "animate-spin")} />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Parent company + siblings */}
+        <div>
+          <div className="flex items-center gap-1.5 mb-2">
+            <Building className="w-3.5 h-3.5 text-text-muted" />
+            <span className="text-2xs font-medium text-text-muted uppercase tracking-wider">Groupe / maison mere</span>
+          </div>
+          {signals.parentCompany ? (
+            <>
+              <div className="text-sm font-medium text-text-primary mb-1">{signals.parentCompany}</div>
+              {signals.parentSiren && (
+                <a
+                  href={`https://www.pappers.fr/entreprise/${signals.parentSiren}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-2xs text-accent hover:underline inline-flex items-center gap-1"
+                >
+                  SIREN {signals.parentSiren}
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              )}
+            </>
+          ) : (
+            <div className="text-xs text-text-muted">Aucun groupe detecte (entreprise independante)</div>
+          )}
+
+          {/* Related companies via dirigeants — shown regardless of parent group */}
+          {nonClientSiblings.length > 0 && (
+            <div className="mt-3">
+              <div className="text-2xs text-text-muted mb-2">
+                {nonClientSiblings.length} entreprise{nonClientSiblings.length > 1 ? "s" : ""} liee{nonClientSiblings.length > 1 ? "s" : ""} via les dirigeants
+              </div>
+              <div className="space-y-1.5">
+                {nonClientSiblings.map((sib) => {
+                  const score = sib.icpScore ?? 0
+                  const scoreColor = score >= 50 ? "text-positive bg-positive/10 border-positive/20" :
+                    score >= 20 ? "text-warning bg-warning/10 border-warning/20" :
+                    "text-text-muted bg-card-hover border-card-border"
+                  return (
+                    <div key={sib.siren} className="flex items-center gap-2 text-2xs">
+                      <span className={cn("inline-flex items-center justify-center w-8 h-5 rounded border font-mono font-semibold flex-shrink-0", scoreColor)}>
+                        {score}
+                      </span>
+                      <span className={cn("font-medium truncate max-w-[200px]", score >= 50 ? "text-text-primary" : "text-text-secondary")}>
+                        {sib.name}
+                      </span>
+                      {sib.isEcommerce && sib.platform && (
+                        <span className={cn(
+                          "inline-flex items-center gap-0.5 px-1.5 py-0 rounded-full border flex-shrink-0",
+                          sib.fit === "strong"
+                            ? "bg-positive/10 text-positive border-positive/20"
+                            : "bg-warning/10 text-warning border-warning/20"
+                        )}>
+                          <Store className="w-2.5 h-2.5" />{sib.platform}
+                        </span>
+                      )}
+                      {sib.icpSignals && sib.icpSignals.length > 0 && (
+                        <span className="text-text-muted truncate" title={sib.icpSignals.join(" | ")}>
+                          {sib.icpSignals.filter((s) => !s.startsWith("Site:") && !s.startsWith("Plateforme:")).slice(0, 1).join(" · ")}
+                        </span>
+                      )}
+                      <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                        {sib.domain && (
+                          <a
+                            href={`https://${sib.domain}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-text-muted hover:text-accent"
+                            title={sib.domain}
+                          >
+                            <Globe className="w-2.5 h-2.5" />
+                          </a>
+                        )}
+                        <a
+                          href={`https://www.pappers.fr/entreprise/${sib.siren}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-text-muted hover:text-accent"
+                        >
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {clientSiblings.length > 0 && (
+            <div className="mt-2">
+              <div className="text-2xs text-text-muted mb-1">
+                Deja clientes
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {clientSiblings.map((sib) => (
+                  <Link
+                    key={sib.siren}
+                    href={sib.hubspotCompanyId ? `/account/${sib.hubspotCompanyId}` : "#"}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 bg-positive/10 text-positive text-2xs rounded-full border border-positive/20 hover:bg-positive/20 transition-colors"
+                  >
+                    {sib.name}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Stores + Languages */}
+        <div className="space-y-3">
+          <div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Store className="w-3.5 h-3.5 text-text-muted" />
+              <span className="text-2xs font-medium text-text-muted uppercase tracking-wider">Boutiques physiques</span>
+            </div>
+            <div className="text-sm font-medium text-text-primary">
+              {signals.storesCount > 0 ? `${signals.storesCount} boutique${signals.storesCount > 1 ? "s" : ""} detectee${signals.storesCount > 1 ? "s" : ""}` : "Aucune boutique detectee"}
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Globe className="w-3.5 h-3.5 text-text-muted" />
+              <span className="text-2xs font-medium text-text-muted uppercase tracking-wider">Langues / sous-sites</span>
+            </div>
+            {signals.languages.length > 0 ? (
+              <>
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {signals.languages.map((lang) => (
+                    <span key={lang} className="inline-flex px-2 py-0.5 bg-sky-50 text-sky-600 text-2xs rounded-full border border-sky-200 font-medium uppercase">
+                      {lang}
+                    </span>
+                  ))}
+                </div>
+                {signals.subsites.length > 0 && (
+                  <div className="space-y-0.5">
+                    {signals.subsites.slice(0, 5).map((s) => (
+                      <a
+                        key={s.url}
+                        href={s.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-2xs text-accent hover:underline inline-flex items-center gap-1 block"
+                      >
+                        [{s.lang.toUpperCase()}] {new URL(s.url).hostname}{new URL(s.url).pathname !== "/" ? new URL(s.url).pathname : ""}
+                        <ExternalLink className="w-2.5 h-2.5 inline" />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-xs text-text-muted">Mono-langue</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Recommendations */}
+      {(nonClientSiblings.length > 0 || signals.storesCount > 10 || signals.languages.length > 1) && (
+        <div className="mt-4 pt-4 border-t border-card-border">
+          <div className="text-2xs font-medium text-text-muted uppercase tracking-wider mb-2">Opportunites identifiees</div>
+          <ul className="space-y-1 text-xs text-text-primary">
+            {nonClientSiblings.length > 0 && (() => {
+              const ecomSiblings = nonClientSiblings.filter((s) => s.isEcommerce)
+              return (
+                <li className="flex items-start gap-2">
+                  <span className="text-accent mt-0.5">•</span>
+                  <span>
+                    <strong>{nonClientSiblings.length} entreprise{nonClientSiblings.length > 1 ? "s" : ""}</strong> liee{nonClientSiblings.length > 1 ? "s" : ""} via les dirigeants
+                    {ecomSiblings.length > 0 && (
+                      <>, dont <strong className="text-accent">{ecomSiblings.length} ecommerce{ecomSiblings.length > 1 ? "s" : ""}</strong> (ICP Loyoly)</>
+                    )}
+                  </span>
+                </li>
+              )
+            })()}
+            {signals.storesCount > 10 && (
+              <li className="flex items-start gap-2">
+                <span className="text-accent mt-0.5">•</span>
+                <span>
+                  Reseau de <strong>{signals.storesCount} boutiques</strong> — potentiel d'upgrade du plan loyalty
+                </span>
+              </li>
+            )}
+            {signals.languages.length > 1 && (
+              <li className="flex items-start gap-2">
+                <span className="text-accent mt-0.5">•</span>
+                <span>
+                  Presence sur <strong>{signals.languages.length} marches</strong> ({signals.languages.join(", ").toUpperCase()}) — possible ouverture de programmes par pays
+                </span>
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
+
+      {error && <p className="text-xs text-negative mt-3">{error}</p>}
+
+      {debug && (
+        <details className="mt-3 text-2xs">
+          <summary className="cursor-pointer text-text-muted hover:text-text-primary">Debug trace</summary>
+          <pre className="mt-2 p-2 bg-background rounded border border-card-border overflow-x-auto text-2xs font-mono">
+            {JSON.stringify(debug, null, 2)}
+          </pre>
+        </details>
+      )}
     </div>
   )
 }

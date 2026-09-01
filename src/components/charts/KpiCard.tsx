@@ -40,21 +40,21 @@ export function KpiCard({ kpi, icon, warning, danger, children }: KpiCardProps) 
     <div
       className={cn(
         "card animate-fade-in",
-        warning && "border-warning/30",
-        danger && "border-negative/30"
+        warning && "border-warning/40",
+        danger && "border-negative/40"
       )}
     >
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-2xs font-medium text-text-muted uppercase tracking-wider">
           {kpi.label}
         </span>
         {icon && <span className="text-text-muted">{icon}</span>}
       </div>
 
-      <div className="flex items-end gap-3">
+      <div className="flex items-end gap-2">
         <span
           className={cn(
-            "text-2xl font-semibold font-mono text-text-primary",
+            "text-xl font-semibold font-mono text-text-primary",
             warning && "text-warning",
             danger && "text-negative"
           )}
@@ -63,24 +63,23 @@ export function KpiCard({ kpi, icon, warning, danger, children }: KpiCardProps) 
         </span>
 
         {kpi.delta !== 0 && (
-          <span className={cn("flex items-center gap-1 text-xs font-medium pb-0.5", deltaColor)}>
+          <span className={cn("flex items-center gap-0.5 text-2xs font-medium pb-0.5", deltaColor)}>
             {deltaIcon}
             {formatPercent(kpi.delta)}
           </span>
         )}
       </div>
 
-      {children && <div className="mt-3">{children}</div>}
+      {children && <div className="mt-2">{children}</div>}
     </div>
   )
 }
 
-// Skeleton loading state
 export function KpiCardSkeleton() {
   return (
     <div className="card">
-      <div className="skeleton h-3 w-24 mb-3" />
-      <div className="skeleton h-8 w-32" />
+      <div className="skeleton h-3 w-20 mb-3" />
+      <div className="skeleton h-6 w-28" />
     </div>
   )
 }

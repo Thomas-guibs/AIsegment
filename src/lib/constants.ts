@@ -205,6 +205,102 @@ export const CSM_ATTRIBUTIONS = [
 ] as const
 
 // -----------------------------------------------------------------------------
+// Stages retained per movement type (spec §5)
+// -----------------------------------------------------------------------------
+
+export const UPSELL_STAGES: string[] = [
+  SALES_STAGES.CLOSED_WON,        // "closedlost" (Closed Won)
+  SALES_STAGES.PAIEMENT_RECU,     // "143474109"
+]
+
+export const CHURN_DOWNSELL_STAGES: string[] = [
+  SALES_STAGES.CHURN_DOWNSELL,    // "1220133077" — where 275/283 churns land
+  SALES_STAGES.CLOSED_WON,        // "closedlost"
+  SALES_STAGES.PAIEMENT_RECU,     // "143474109"
+]
+
+// -----------------------------------------------------------------------------
+// Date used to attribute a movement to a month (spec §5)
+// -----------------------------------------------------------------------------
+
+export function movementDate(deal: { attribution: string | null; paymentDate: string | null; operationDate: string | null }): string | null {
+  if (deal.attribution === ATTRIBUTION.UPSELL) return deal.paymentDate
+  return deal.operationDate
+}
+
+export function movementStages(attribution: string | null): string[] | null {
+  if (attribution === ATTRIBUTION.UPSELL) return UPSELL_STAGES
+  if (attribution === ATTRIBUTION.CHURN || attribution === ATTRIBUTION.DOWNSELL) return CHURN_DOWNSELL_STAGES
+  return null
+}
+
+export function isRetainedMovement(deal: { attribution: string | null; stage: string; paymentDate: string | null; operationDate: string | null; amount: number }): boolean {
+  const stages = movementStages(deal.attribution)
+  if (!stages || !stages.includes(deal.stage)) return false
+  if (!movementDate(deal)) return false
+  if (deal.amount === 0) return false
+  return true
+}
+
+// -----------------------------------------------------------------------------
+// Booked vs Billed — dashboard calculation modes
+// -----------------------------------------------------------------------------
+
+export type CalcMethod = "booked" | "billed"
+
+export function movementDateFor(
+  deal: { attribution: string | null; paymentDate: string | null; operationDate: string | null },
+  method: CalcMethod
+): string | null {
+  if (method === "booked") return deal.operationDate
+  // billed: upsell by payment, churn/downsell by operation (default spec §5)
+  return movementDate(deal)
+}
+
+// -----------------------------------------------------------------------------
+// Countries / Regions (spec: FR / GB / ES from `code_pays_region`)
+// -----------------------------------------------------------------------------
+
+export const COUNTRIES = ["FR", "GB", "ES"] as const
+export type Country = (typeof COUNTRIES)[number]
+
+export function normalizeCountry(raw: string | null | undefined): Country | null {
+  if (!raw) return null
+  const v = raw.trim().toUpperCase()
+  if (v === "FR" || v === "UK" || v === "GB" || v === "ES") {
+    // "UK" label sometimes appears in HubSpot data even though the ISO code is GB
+    if (v === "UK") return "GB"
+    return v as Country
+  }
+  return null
+}
+
+// -----------------------------------------------------------------------------
+// Tiers (customer_revenue_tiers)
+// Canonical values: "T1", "T2", "T3", "T4" — but we also accept and pass
+// through any other tier name HubSpot uses (Bronze/Silver/Gold, SMB/Mid/Ent…)
+// so the dashboard doesn't silently drop them.
+// -----------------------------------------------------------------------------
+
+export const TIERS = ["T1", "T2", "T3", "T4"] as const
+export type Tier = string  // widened — the raw HubSpot value is kept as-is
+
+// Normalize a HubSpot tier value. If it clearly maps to T1..T4 (contains a
+// matching digit), returns that canonical label. Otherwise returns the raw
+// string trimmed — never null when input is non-empty.
+export function normalizeTier(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const v = raw.trim()
+  if (!v) return null
+  const upper = v.toUpperCase()
+  if (upper.includes("T1") || upper === "1" || upper.includes("TIER 1")) return "T1"
+  if (upper.includes("T2") || upper === "2" || upper.includes("TIER 2")) return "T2"
+  if (upper.includes("T3") || upper === "3" || upper.includes("TIER 3")) return "T3"
+  if (upper.includes("T4") || upper === "4" || upper.includes("TIER 4")) return "T4"
+  return v
+}
+
+// -----------------------------------------------------------------------------
 // CSM Team
 // Add a new CSM = add a new entry. That's it.
 // -----------------------------------------------------------------------------
@@ -223,10 +319,17 @@ export const CSM_TEAM: CSMMember[] = [
   { id: "78820483", name: "Marthe Potin", role: "CSM", initials: "MP", color: "#EC4899" },
   { id: "31564081", name: "Fatima Hilmi", role: "CSM", initials: "FH", color: "#F97316" },
   { id: "1949410186", name: "Antoine Rivaud", role: "CSM", initials: "AR", color: "#14B8A6" },
+  { id: "34101101", name: "Nora Rodriguez", role: "CSM", initials: "NR", color: "#F59E0B" },
+  { id: "585476561", name: "Thomas Guibert", role: "CSM (founder)", initials: "TG", color: "#3B82F6" },
   { id: "44919918", name: "Thomas Prouveur", role: "COO (backup)", initials: "TP", color: "#64748B" },
 ]
 
 export const CSM_TEAM_IDS = CSM_TEAM.map((m) => m.id)
+
+// CSMs who appear as chart series (excludes backup/COO)
+export const CHART_CSMS = CSM_TEAM
+  .filter((m) => m.role !== "COO (backup)")
+  .map((m) => ({ name: m.name, color: m.color }))
 
 export function getCsmById(id: string): CSMMember | undefined {
   return CSM_TEAM.find((m) => m.id === id)
@@ -264,7 +367,9 @@ export const DEAL_PROPERTIES = [
   "hs_acv",
   "attribution",
   "renewall_date",
+  "renewall_strategy",
   "date_de_prise_en_compte",
+  "date_de_paiement",
   "expected_closing_date",
   "closedate",
   "dealstage",
@@ -273,16 +378,17 @@ export const DEAL_PROPERTIES = [
   "createdate",
   "hs_lastmodifieddate",
   "hs_deal_stage_probability",
+  "deal_eligibility",
 ] as const
 
 // Company properties to fetch
-// MRR source: "total_revenue" (= Chiffre d'affaire total in HubSpot)
-// Customer filter: "phase_du_client" (Customer stage) not "lifecyclestage"
 export const COMPANY_PROPERTIES = [
   "name",
   "domain",
   "total_revenue",
   "plan",
+  "client_revenue_tiers",
+  "code_pays_region",
   "hubspot_owner_id",
   "proprietaire_de_l_entreprise__csm_",
   "lifecyclestage",
@@ -310,9 +416,6 @@ export const COMPANY_PROPERTIES = [
 ] as const
 
 // Customer stage (phase_du_client) — active values for CSM dashboard
-// HubSpot internal values → display labels:
-//   "New" → Signed | "To come" → Engaged | "Onboarding" → Onboarding
-//   "Activated" → Activated | "Run" → Run
 export const ACTIVE_CUSTOMER_STAGES = ["New", "To come", "Onboarding", "Activated", "Run"] as const
 
 export const CUSTOMER_PHASE_LABELS: Record<string, string> = {
@@ -326,16 +429,3 @@ export const CUSTOMER_PHASE_LABELS: Record<string, string> = {
   "Lead": "Lead",
   "Parent company": "Parent company",
 }
-
-// =============================================================================
-// DATA ARCHITECTURE NOTE
-// =============================================================================
-// Customer tracking uses:
-//   - Companies with phase_du_client IN [New, To come, Onboarding, Activated, Run]
-//   - hubspot_owner_id matching CSM_TEAM_IDS for per-CSM breakdown
-//   - total_revenue as the MRR/revenue field ("Chiffre d'affaire total")
-//
-// Deal tracking (Upsell/Churn/Downsell/Renewals) uses:
-//   - Deals in Sales pipeline ("default") with "attribution" property
-//   - Renewal deals identified by "renewall_date" property
-// =============================================================================

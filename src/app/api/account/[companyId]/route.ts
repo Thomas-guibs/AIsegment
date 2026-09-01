@@ -6,6 +6,7 @@ import { hubspotFetch } from "@/lib/hubspot/client"
 import { fetchIntercomTickets, countOpenTickets } from "@/lib/intercom/client"
 import { fetchMeetingsForCompany } from "@/lib/google/calendar"
 import { calculateHealthScore } from "@/lib/scoring/health"
+import { getCachedEnrichment } from "@/lib/enrichment"
 import type { Deal, AccountDetail } from "@/lib/types"
 import { DEAL_PROPERTIES, CSM_TEAM } from "@/lib/constants"
 import { parseNumber, parseDate } from "@/lib/utils"
@@ -31,7 +32,7 @@ export async function GET(
     // 2. Fetch deals, tickets, meetings in parallel
     const [dealIds, tickets, meetings] = await Promise.all([
       fetchCompanyDeals(companyId),
-      fetchIntercomTickets(company.domain ?? ""),
+      fetchIntercomTickets(company.name, company.domain),
       fetchMeetingsForCompany(
         company.name,
         company.domain,
@@ -63,7 +64,9 @@ export async function GET(
           acv: parseNumber(r.properties.hs_acv),
           attribution: r.properties.attribution ?? null,
           renewalDate: parseDate(r.properties.renewall_date),
+          renewalStrategy: r.properties.renewall_strategy ?? null,
           operationDate: parseDate(r.properties.date_de_prise_en_compte),
+          paymentDate: parseDate(r.properties.date_de_paiement),
           closeDate: parseDate(r.properties.closedate),
           stage: r.properties.dealstage ?? "",
           pipeline: r.properties.pipeline ?? "",
@@ -95,6 +98,10 @@ export async function GET(
       : null
 
     const healthScore = calculateHealthScore(company, openTicketCount, daysSinceLastActivity)
+
+    // Inject cached upsell signals if available
+    const upsellSignals = getCachedEnrichment(companyId)
+    if (upsellSignals) company.upsellSignals = upsellSignals
 
     const accountDetail: AccountDetail = {
       company,

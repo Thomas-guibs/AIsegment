@@ -20,6 +20,8 @@ const PIPE_STAGES = [
   { id: SALES_STAGES.EVALUATE_50, label: "Evaluate (50%)", order: 3 },
   { id: SALES_STAGES.OFFRE_ENVOYEE_70, label: "Offre envoyee (70%)", order: 4 },
   { id: SALES_STAGES.GO_VERBAL_80, label: "Go verbal (80%)", order: 5 },
+  { id: SALES_STAGES.CLOSED_WON, label: "Closed Won", order: 6 },
+  { id: SALES_STAGES.PAIEMENT_RECU, label: "Paiement recu", order: 7 },
 ]
 
 // Closed stages (for reference, not in the active pipe)
@@ -41,7 +43,9 @@ function transformDeal(raw: HubSpotDeal): Deal {
     acv: parseNumber(raw.properties.hs_acv),
     attribution: raw.properties.attribution ?? null,
     renewalDate: parseDate(raw.properties.renewall_date),
+    renewalStrategy: raw.properties.renewall_strategy ?? null,
     operationDate: parseDate(raw.properties.date_de_prise_en_compte),
+    paymentDate: parseDate(raw.properties.date_de_paiement),
     closeDate: parseDate(raw.properties.closedate),
     stage: raw.properties.dealstage ?? "",
     pipeline: raw.properties.pipeline ?? "",

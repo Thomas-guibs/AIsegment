@@ -15,7 +15,9 @@ function transformDeal(raw: HubSpotDeal): Deal {
     acv: parseNumber(raw.properties.hs_acv),
     attribution: raw.properties.attribution ?? null,
     renewalDate: parseDate(raw.properties.renewall_date),
+    renewalStrategy: raw.properties.renewall_strategy ?? null,
     operationDate: parseDate(raw.properties.date_de_prise_en_compte),
+    paymentDate: parseDate(raw.properties.date_de_paiement),
     closeDate: parseDate(raw.properties.closedate),
     stage: raw.properties.dealstage ?? "",
     pipeline: raw.properties.pipeline ?? "",
@@ -57,9 +59,6 @@ export async function fetchCustomerDeals(ownerId?: string): Promise<Deal[]> {
 }
 
 // Fetch deals by attribution (Upsell, Churn, Downsell) within a date range.
-// HubSpot Search API doesn't reliably support filtering on custom date properties
-// like date_de_prise_en_compte. Strategy: fetch by attribution using IN operator
-// (single filter group), then filter by date client-side.
 export async function fetchAttributionDeals(
   attributions: string[],
   dateFrom: string,
@@ -84,7 +83,7 @@ export async function fetchAttributionDeals(
 
   const deals = raw.map(transformDeal)
 
-  // Client-side date filtering on date_de_prise_en_compte
+  // Client-side date filtering
   return deals.filter((d) => {
     const opDate = d.operationDate ?? d.closeDate ?? d.createdAt
     if (!opDate) return false
@@ -104,8 +103,6 @@ export async function fetchCsmMovements(dateFrom: string, dateTo: string, ownerI
 }
 
 // Fetch deals with renewals in a date range.
-// renewall_date is a custom property — HubSpot Search API doesn't support
-// GTE/LTE on it. Strategy: fetch all deals with renewall_date set, filter client-side.
 export async function fetchRenewalDeals(dateFrom: string, dateTo: string, ownerId?: string): Promise<Deal[]> {
   const filters: SearchFilterGroup[] = [
     {
@@ -125,7 +122,6 @@ export async function fetchRenewalDeals(dateFrom: string, dateTo: string, ownerI
 
   const deals = raw.map(transformDeal)
 
-  // Client-side date filtering on renewall_date
   return deals
     .filter((d) => {
       if (!d.renewalDate) return false
@@ -161,7 +157,7 @@ export async function fetchNewDealsThisWeek(attribution: string): Promise<Deal[]
   return raw.map(transformDeal)
 }
 
-// Get company names for a list of deal IDs (via associations)
+// Get company names, tiers and countries for a list of deal IDs (via associations)
 export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
   if (deals.length === 0) return deals
 
@@ -193,18 +189,26 @@ export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
 
       if (companyIds.size > 0) {
         const companiesResponse = await hubspotFetch<{
-          results: Array<{ id: string; properties: { name: string } }>
+          results: Array<{ id: string; properties: { name: string; client_revenue_tiers?: string; code_pays_region?: string } }>
         }>("/crm/v3/objects/companies/batch/read", {
           method: "POST",
           body: {
             inputs: Array.from(companyIds).map((id) => ({ id })),
-            properties: ["name"],
+            properties: ["name", "client_revenue_tiers", "code_pays_region"],
           },
         })
 
         const companyNames = new Map<string, string>()
+        const companyTiers = new Map<string, string>()
+        const companyCountries = new Map<string, string>()
         for (const company of companiesResponse.results) {
           companyNames.set(company.id, company.properties.name)
+          if (company.properties.client_revenue_tiers) {
+            companyTiers.set(company.id, company.properties.client_revenue_tiers)
+          }
+          if (company.properties.code_pays_region) {
+            companyCountries.set(company.id, company.properties.code_pays_region)
+          }
         }
 
         for (const deal of deals) {
@@ -212,6 +216,8 @@ export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
           if (companyId) {
             deal.companyId = companyId
             deal.companyName = companyNames.get(companyId) ?? undefined
+            deal.companyRevenueTier = companyTiers.get(companyId) ?? undefined
+            deal.companyCountry = companyCountries.get(companyId) ?? undefined
           }
         }
       }

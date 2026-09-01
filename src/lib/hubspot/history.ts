@@ -21,6 +21,7 @@ export interface CompanyHistory {
   id: string
   name: string
   domain: string | null
+  createdAt: string | null           // hs_createdate — used as fallback billing anchor
   mrr: HistoryEntry<number>[]        // sorted ASC
   csm: HistoryEntry<string | null>[]  // sorted ASC
   phase: HistoryEntry<string | null>[] // sorted ASC
@@ -85,6 +86,7 @@ export async function fetchCompanyHistoryBatch(
             "name",
             "domain",
             "hs_createdate",
+            "hubspot_owner_id",
             ...HISTORY_PROPERTIES,
           ],
           propertiesWithHistory: [...HISTORY_PROPERTIES],
@@ -111,8 +113,15 @@ export async function fetchCompanyHistoryBatch(
       const csmHist = (history["proprietaire_de_l_entreprise__csm_"] ?? [])
         .map((h) => ({ timestamp: h.timestamp, value: h.value || null }))
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-      const csm = csmHist.length === 0 && r.properties.proprietaire_de_l_entreprise__csm_
-        ? [{ timestamp: createdAt, value: r.properties.proprietaire_de_l_entreprise__csm_ }]
+      // CSM history fallback:
+      //   1. current value of proprietaire_de_l_entreprise__csm_ (custom field)
+      //   2. hubspot_owner_id (some accounts only have the standard owner)
+      const csmCurrent =
+        r.properties.proprietaire_de_l_entreprise__csm_ ??
+        r.properties.hubspot_owner_id ??
+        null
+      const csm = csmHist.length === 0 && csmCurrent
+        ? [{ timestamp: createdAt, value: csmCurrent }]
         : csmHist
 
       const phaseHist = (history["phase_du_client"] ?? [])
@@ -126,6 +135,7 @@ export async function fetchCompanyHistoryBatch(
         id: r.id,
         name: r.properties.name ?? "",
         domain: r.properties.domain ?? null,
+        createdAt: r.properties.hs_createdate ?? null,
         mrr,
         csm,
         phase,

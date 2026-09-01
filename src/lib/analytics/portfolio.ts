@@ -102,6 +102,9 @@ export function hasExited(
 //   2. CSM dans le périmètre demandé
 //   3. MRR à T > 0
 //   4. Client déjà facturé — plus ancienne date_de_paiement < T
+//      Fallback: company.createdAt < T (companies whose deals never had
+//      date_de_paiement populated in HubSpot still count if they were
+//      created before T — a pragmatic relaxation of the strict spec).
 //   5. Pas sorti du portefeuille (§4)
 export function mrrUnderManagement(
   companies: CompanyHistory[],
@@ -110,6 +113,7 @@ export function mrrUnderManagement(
   t: string,
   csmFilter?: string
 ): MrrContribution[] {
+  const tDate = t.slice(0, 10)
   const out: MrrContribution[] = []
   for (const c of companies) {
     // 1. CSM known at T
@@ -120,9 +124,11 @@ export function mrrUnderManagement(
     // 3. MRR > 0 at T
     const mrr = valueAt(c.mrr, t) ?? 0
     if (mrr <= 0) continue
-    // 4. Already billed — plus ancienne date_de_paiement < T
+    // 4. Already billed — earliest date_de_paiement < T
+    //    or company createdAt < T as fallback when payment dates are missing
     const earlyPay = earliestPayment.get(c.id)
-    if (!earlyPay || earlyPay >= t.slice(0, 10)) continue
+    const billingAnchor = earlyPay ?? (c.createdAt ? c.createdAt.slice(0, 10) : null)
+    if (!billingAnchor || billingAnchor >= tDate) continue
     // 5. Not exited (§4)
     if (hasExited(c, companyDealsMap.get(c.id) ?? [], t, mrr)) continue
 

@@ -32,16 +32,22 @@ export function monthKeyOf(iso: string): string {
   return iso.slice(0, 7)
 }
 
-// Earliest date_de_paiement across a company's deals (spec §3 condition 4:
-// "la plus ancienne date_de_paiement parmi les deals du compte, toutes
-// attributions confondues"). Returns null if no deal has a payment date.
+// Earliest billing date across a company's deals (spec §3 condition 4).
+// Spec §3.4 asks for the earliest `date_de_paiement`; we fall back to
+// `date_de_prise_en_compte` (operationDate) when payment date is missing,
+// because HubSpot in this instance does not systematically populate
+// date_de_paiement on new-business deals. The intent of the condition —
+// "le client était déjà facturé avant le 1er du mois" — is preserved:
+// operationDate marks when the deal was accounted for.
 export function earliestPaymentByCompany(deals: Deal[]): Map<string, string> {
   const map = new Map<string, string>()
   for (const d of deals) {
-    if (!d.paymentDate || !d.companyId) continue
+    if (!d.companyId) continue
+    const date = d.paymentDate ?? d.operationDate
+    if (!date) continue
     const current = map.get(d.companyId)
-    if (!current || d.paymentDate < current) {
-      map.set(d.companyId, d.paymentDate)
+    if (!current || date < current) {
+      map.set(d.companyId, date)
     }
   }
   return map

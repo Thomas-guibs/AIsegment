@@ -27,6 +27,7 @@ import {
   COUNTRIES,
 } from "@/lib/constants"
 import {
+  earliestPaymentByCompany,
   dealsByCompany,
   mrrUnderManagement,
   ownerAtMonthStart,
@@ -189,6 +190,7 @@ export async function GET(request: NextRequest) {
     for (const d of renewalDeals) if (d.companyId) companyIdSet.add(d.companyId)
     const historyMap = await fetchCompanyHistoryBatch(Array.from(companyIdSet))
     const historyList = Array.from(historyMap.values())
+    const earliestPayment = earliestPaymentByCompany(allDeals)
     const companyDealsMap = dealsByCompany(allDeals)
 
     const companyMeta = new Map<
@@ -246,9 +248,9 @@ export async function GET(request: NextRequest) {
       }
       const contribs = mrrUnderManagement(
         historyList,
+        earliestPayment,
         companyDealsMap,
-        p.startIso,
-        calcMethod
+        p.startIso
       )
       for (const c of contribs) {
         bucket.total += c.mrr
@@ -424,8 +426,7 @@ export async function GET(request: NextRequest) {
     })
     const tierList = Array.from(discoveredTiers).sort()
 
-    // CSM label: disambiguate when two CSMs share a first name (e.g. two
-    // "Antoine"s in the team). Falls back to "First L." if collision.
+    // CSM label: disambiguate when two CSMs share a first name.
     const firstNameCounts = new Map<string, number>()
     for (const c of CHART_CSMS) {
       const first = c.name.split(" ")[0]

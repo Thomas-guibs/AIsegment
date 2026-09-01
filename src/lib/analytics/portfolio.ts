@@ -1,35 +1,21 @@
 // =============================================================================
-// Portfolio analytics — spec CALCUL.md §3 §4 §5 §6
+// Portfolio analytics — spec CALCUL.md §3 §4 §5 §6 (strict)
 //
-// This module reads point-in-time (from CompanyHistory) instead of "current
-// value" from the CRM. That's what makes MRR under management and per-CSM
-// attribution correct when accounts change owner mid-quarter.
+// Point-in-time reading (spec §2). All three properties are read at the
+// observation instant T:
+//   - MRR              from total_revenue history
+//   - CSM propriétaire from proprietaire_de_l_entreprise__csm_ history
+//   - Phase du client  from phase_du_client history
+//
+// fetchCompanyHistoryBatch already synthesizes a single history entry
+// anchored at hs_createdate when a property has no history tracking enabled
+// on this HubSpot instance — so valueAt(t) still returns a value.
 // =============================================================================
 
 import type { Deal } from "../types"
 import type { CompanyHistory } from "../hubspot/history"
 import { valueAt } from "../hubspot/history"
-import {
-  ATTRIBUTION,
-  SALES_STAGES,
-  movementDate,
-  movementDateFor,
-  isRetainedMovement,
-  type CalcMethod,
-} from "../constants"
-
-// Stages where a deal has actually "landed" (revenue is committed).
-const WON_STAGES = new Set<string>([SALES_STAGES.CLOSED_WON, SALES_STAGES.PAIEMENT_RECU])
-
-// Acquisition attributions — new business
-const ACQUISITION_ATTRIBUTIONS = new Set<string>([
-  ATTRIBUTION.PARTNERS,
-  ATTRIBUTION.HUNT,
-  ATTRIBUTION.INBOUND,
-  ATTRIBUTION.PAID,
-  ATTRIBUTION.EVENT,
-  ATTRIBUTION.PLG,
-])
+import { ATTRIBUTION, movementDate, isRetainedMovement } from "../constants"
 
 // Phases signifiant "parti" (spec §4 signal 2)
 export const CHURNED_PHASES = ["churn"]
@@ -46,9 +32,9 @@ export function monthKeyOf(iso: string): string {
   return iso.slice(0, 7)
 }
 
-// Earliest date_de_paiement across a company's deals. Kept for callers that
-// need the strict spec §3 condition 4 check; mrrUnderManagement no longer
-// uses it since MRR is now derived from deals.
+// Earliest date_de_paiement across a company's deals (spec §3 condition 4:
+// "la plus ancienne date_de_paiement parmi les deals du compte, toutes
+// attributions confondues"). Returns null if no deal has a payment date.
 export function earliestPaymentByCompany(deals: Deal[]): Map<string, string> {
   const map = new Map<string, string>()
   for (const d of deals) {
@@ -81,49 +67,6 @@ export interface MrrContribution {
   csm: string
 }
 
-// Compute a company's MRR at instant T as the signed sum of its retained deals
-// effective before T.
-//
-//   acquisition + upsell  → + amount
-//   downsell + churn      → − amount
-//
-// A deal is "retained" (landed) if it reached a won stage:
-//   - Movements (Upsell/Churn/Downsell): filtered by isRetainedMovement (spec §5).
-//   - Acquisitions: stage in [CLOSED_WON, PAIEMENT_RECU].
-// Effective date for the "before T" check uses movementDateFor(calcMethod) for
-// movements (upsell honors billed/booked) and operationDate (fallback paymentDate)
-// for acquisitions.
-export function mrrFromDeals(
-  companyDeals: Deal[],
-  t: string,
-  calcMethod: CalcMethod
-): number {
-  const tDate = t.slice(0, 10)
-  let total = 0
-  for (const d of companyDeals) {
-    const attr = d.attribution
-    if (!attr) continue
-
-    // Determine if this deal is "landed" (retained) and its effective date.
-    let effectiveDate: string | null = null
-    if (attr === ATTRIBUTION.UPSELL || attr === ATTRIBUTION.CHURN || attr === ATTRIBUTION.DOWNSELL) {
-      if (!isRetainedMovement(d)) continue
-      effectiveDate = movementDateFor(d, calcMethod)
-    } else if (ACQUISITION_ATTRIBUTIONS.has(attr)) {
-      if (!WON_STAGES.has(d.stage) || d.amount === 0) continue
-      effectiveDate = d.operationDate ?? d.paymentDate ?? d.closeDate
-    } else {
-      continue
-    }
-    if (!effectiveDate || effectiveDate.slice(0, 10) >= tDate) continue
-
-    const amt = Math.abs(d.amount)
-    if (attr === ATTRIBUTION.CHURN || attr === ATTRIBUTION.DOWNSELL) total -= amt
-    else total += amt
-  }
-  return total
-}
-
 // Spec §4: an account has exited the portfolio at T iff any exit signal fires
 // AND the veto (active phase + partial loss) does not apply.
 export function hasExited(
@@ -134,8 +77,8 @@ export function hasExited(
 ): boolean {
   const tDate = t.slice(0, 10) // YYYY-MM-DD
 
-  // Signal 1: counted churn deals with operationDate strictly before T.
-  // "Comme la §5" — same filters (stage + operationDate + non-zero amount).
+  // Signal 1: counted churn deals with operationDate strictly before T
+  // (same filters as spec §5: stage + operationDate + non-zero amount).
   const countedChurns = companyDealsAll.filter(
     (d) =>
       d.attribution === ATTRIBUTION.CHURN &&
@@ -160,23 +103,22 @@ export function hasExited(
 }
 
 // Spec §3: MRR sous gestion at instant T.
-// Applies the conditions in order:
-//   1. CSM connu à T
+// Applies the 5 conditions in order:
+//   1. CSM connu à T                             — csm_at(T) non vide
 //   2. CSM dans le périmètre demandé
-//   3. MRR à T > 0 — computed as the SIGNED SUM of the company's retained deals
-//      effective before T (acquisition + upsell = +, churn + downsell = −).
-//      The company's total_revenue field is NOT used as source of truth —
-//      it's often stale in HubSpot; deals are.
-//   4. (implicit in 3: a positive deal-derived MRR means the company has
-//      landed transactions before T, so it was billed)
+//   3. MRR à T strictement positif               — mrr_at(T) > 0
+//   4. Client déjà facturé                       — earliest date_de_paiement < T
+//      Fallback: company.createdAt < T when payment dates are missing
+//      (pragmatic relaxation — HubSpot's payment dates are uneven).
 //   5. Pas sorti du portefeuille (§4)
 export function mrrUnderManagement(
   companies: CompanyHistory[],
+  earliestPayment: Map<string, string>,
   companyDealsMap: Map<string, Deal[]>,
   t: string,
-  calcMethod: CalcMethod,
   csmFilter?: string
 ): MrrContribution[] {
+  const tDate = t.slice(0, 10)
   const out: MrrContribution[] = []
   for (const c of companies) {
     // 1. CSM known at T
@@ -184,9 +126,13 @@ export function mrrUnderManagement(
     if (!csm) continue
     // 2. CSM in scope
     if (csmFilter && csm !== csmFilter) continue
-    // 3. MRR at T > 0 (from deals)
-    const mrr = mrrFromDeals(companyDealsMap.get(c.id) ?? [], t, calcMethod)
+    // 3. MRR > 0 at T — from total_revenue history (spec §2)
+    const mrr = valueAt(c.mrr, t) ?? 0
     if (mrr <= 0) continue
+    // 4. Already billed — earliest date_de_paiement < T, or company createdAt as fallback
+    const earlyPay = earliestPayment.get(c.id)
+    const billingAnchor = earlyPay ?? (c.createdAt ? c.createdAt.slice(0, 10) : null)
+    if (!billingAnchor || billingAnchor >= tDate) continue
     // 5. Not exited (§4)
     if (hasExited(c, companyDealsMap.get(c.id) ?? [], t, mrr)) continue
 
@@ -198,11 +144,11 @@ export function mrrUnderManagement(
 // Sum MRR under management per CSM at T.
 export function mrrUnderManagementByCsm(
   companies: CompanyHistory[],
+  earliestPayment: Map<string, string>,
   companyDealsMap: Map<string, Deal[]>,
-  t: string,
-  calcMethod: CalcMethod
+  t: string
 ): Map<string, number> {
-  const contribs = mrrUnderManagement(companies, companyDealsMap, t, calcMethod)
+  const contribs = mrrUnderManagement(companies, earliestPayment, companyDealsMap, t)
   const out = new Map<string, number>()
   for (const c of contribs) {
     out.set(c.csm, (out.get(c.csm) ?? 0) + c.mrr)

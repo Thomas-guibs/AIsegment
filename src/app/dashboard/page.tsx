@@ -89,16 +89,13 @@ function DashboardContent() {
   const [expanded, setExpanded] = useState<Set<MetricKey>>(new Set())
   const [drawer, setDrawer] = useState<{ title: string; dealIds: string[] } | null>(null)
 
-  const { data, loading, error, refetch } = useFetch<DashboardResponse>("/api/dashboard", {
-    periodType,
-    calcMethod,
-    months: "12",
-  })
+  const fetchParams = useMemo(
+    () => ({ periodType, calcMethod, months: "12" }),
+    [periodType, calcMethod]
+  )
+  const { data, loading, error, refetch } = useFetch<DashboardResponse>("/api/dashboard", fetchParams)
 
-  if (error && !loading) {
-    return <div className="p-6"><ErrorState message="Impossible de charger le dashboard" onRetry={refetch} /></div>
-  }
-
+  // ALL hooks must be called on every render — no early returns before this line.
   const periodsReversed = useMemo(() => (data?.periods ?? []).slice().reverse(), [data?.periods])
 
   const toggleMetric = (k: MetricKey) => {
@@ -111,6 +108,10 @@ function DashboardContent() {
   }
 
   const openDrawer = (title: string, dealIds: string[]) => setDrawer({ title, dealIds })
+
+  if (error && !loading) {
+    return <div className="p-6"><ErrorState message="Impossible de charger le dashboard" onRetry={refetch} /></div>
+  }
 
   return (
     <div className="p-6 space-y-4">

@@ -27,7 +27,6 @@ import {
   COUNTRIES,
 } from "@/lib/constants"
 import {
-  earliestPaymentByCompany,
   dealsByCompany,
   mrrUnderManagement,
   ownerAtMonthStart,
@@ -190,7 +189,6 @@ export async function GET(request: NextRequest) {
     for (const d of renewalDeals) if (d.companyId) companyIdSet.add(d.companyId)
     const historyMap = await fetchCompanyHistoryBatch(Array.from(companyIdSet))
     const historyList = Array.from(historyMap.values())
-    const earliestPayment = earliestPaymentByCompany(allDeals)
     const companyDealsMap = dealsByCompany(allDeals)
 
     const companyMeta = new Map<
@@ -248,9 +246,9 @@ export async function GET(request: NextRequest) {
       }
       const contribs = mrrUnderManagement(
         historyList,
-        earliestPayment,
         companyDealsMap,
-        p.startIso
+        p.startIso,
+        calcMethod
       )
       for (const c of contribs) {
         bucket.total += c.mrr

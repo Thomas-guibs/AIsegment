@@ -24,7 +24,6 @@ import {
   movementDate,
 } from "@/lib/constants"
 import {
-  earliestPaymentByCompany,
   dealsByCompany,
   mrrUnderManagement,
   ownerAtMonthStart,
@@ -120,13 +119,10 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // Wide window for earliest-payment discovery (covers historical first bills)
+    // Wide window for historical coverage
     const wideFrom = "2010-01-01"
     const wideTo = format(now, "yyyy-MM-dd")
 
-    // Fetch — companies + all deals in the sales pipeline that carry a payment
-    // or a movement. We fetch ALL attributions (movements + acquisitions) on a
-    // very wide window so earliest-payment lookup has the first bill.
     const [activeCompanies, allAttributedDealsRaw] = await Promise.all([
       fetchCustomerCompanies(),
       fetchAttributionDeals(
@@ -152,21 +148,20 @@ export async function GET(request: NextRequest) {
     const historyMap = await fetchCompanyHistoryBatch(Array.from(companyIdSet))
     const historyList = Array.from(historyMap.values())
 
-    // Derived maps for §3 condition 4 and §4 exit signal
-    const earliestPayment = earliestPaymentByCompany(allDeals)
     const companyDealsMap = dealsByCompany(allDeals)
 
     // -------------------------------------------------------------------------
     // MRR under management per (CSM, month) — spec §3 §4
+    // Uses "billed" mode by default (spec §5) — upsell dated by paymentDate.
     // -------------------------------------------------------------------------
     const mrrByCsmMonth = new Map<string, Map<string, number>>()
     // key format: `${csmId}::${monthKey}` → mrr
     for (const m of months) {
       const contribs = mrrUnderManagement(
         historyList,
-        earliestPayment,
         companyDealsMap,
-        m.tIso
+        m.tIso,
+        "billed"
       )
       for (const c of contribs) {
         if (!mrrByCsmMonth.has(c.csm)) mrrByCsmMonth.set(c.csm, new Map())

@@ -2,11 +2,6 @@ export const dynamic = "force-dynamic"
 
 // =============================================================================
 // Dashboard — table centrale (NRR / GRR / Upsell / Churn / Downsell / Renew)
-//
-// Query params:
-//   periodType   month | quarter | year  (default month)
-//   calcMethod   booked | billed         (default billed — spec §5)
-//   months       int, number of months to look back (default 12)
 // =============================================================================
 
 import { NextRequest, NextResponse } from "next/server"
@@ -29,9 +24,7 @@ import {
   normalizeTier,
   type CalcMethod,
   type Country,
-  type Tier,
   COUNTRIES,
-  TIERS,
 } from "@/lib/constants"
 import {
   earliestPaymentByCompany,
@@ -202,7 +195,7 @@ export async function GET(request: NextRequest) {
 
     const companyMeta = new Map<
       string,
-      { tier: Tier | null; country: Country | null }
+      { tier: string | null; country: Country | null }
     >()
     for (const c of activeCompanies) {
       companyMeta.set(c.id, {
@@ -425,14 +418,38 @@ export async function GET(request: NextRequest) {
       return { id, label, perPeriod }
     }
 
+    // Discover tier values present in the data (so we don't hardcode T1..T4
+    // and miss whatever labels HubSpot actually uses).
+    const discoveredTiers = new Set<string>()
+    companyMeta.forEach((meta) => {
+      if (meta.tier) discoveredTiers.add(meta.tier)
+    })
+    const tierList = Array.from(discoveredTiers).sort()
+
+    // CSM label: disambiguate when two CSMs share a first name (e.g. two
+    // "Antoine"s in the team). Falls back to "First L." if collision.
+    const firstNameCounts = new Map<string, number>()
+    for (const c of CHART_CSMS) {
+      const first = c.name.split(" ")[0]
+      firstNameCounts.set(first, (firstNameCounts.get(first) ?? 0) + 1)
+    }
+    const csmLabel = (fullName: string): string => {
+      const parts = fullName.split(" ")
+      const first = parts[0]
+      if ((firstNameCounts.get(first) ?? 0) > 1 && parts.length > 1) {
+        return `${first} ${parts[parts.length - 1][0]}.`
+      }
+      return first
+    }
+
     const buildDimensionRows = (
       builder: (dim: string, id: string, label: string) => Row
     ): { byCsm: Row[]; byTier: Row[]; byCountry: Row[] } => {
       const byCsm = CHART_CSMS.map((c) => {
         const csmId = CSM_TEAM.find((t) => t.name === c.name)?.id
-        return csmId ? builder(`csm:${csmId}`, csmId, c.name.split(" ")[0]) : null
+        return csmId ? builder(`csm:${csmId}`, csmId, csmLabel(c.name)) : null
       }).filter(Boolean) as Row[]
-      const byTier = TIERS.map((t) => builder(`tier:${t}`, t, t))
+      const byTier = tierList.map((t) => builder(`tier:${t}`, t, t))
       const byCountry = COUNTRIES.map((c) => builder(`country:${c}`, c, c))
       return { byCsm, byTier, byCountry }
     }

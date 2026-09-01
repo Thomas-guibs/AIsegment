@@ -244,10 +244,6 @@ export function isRetainedMovement(deal: { attribution: string | null; stage: st
 
 // -----------------------------------------------------------------------------
 // Booked vs Billed — dashboard calculation modes
-//
-// Booked: all movements (upsell/churn/downsell) bucketed by operationDate
-// Billed: upsell by paymentDate, churn/downsell by operationDate
-//         (this is the default — matches spec §5)
 // -----------------------------------------------------------------------------
 
 export type CalcMethod = "booked" | "billed"
@@ -281,21 +277,27 @@ export function normalizeCountry(raw: string | null | undefined): Country | null
 
 // -----------------------------------------------------------------------------
 // Tiers (customer_revenue_tiers)
-// Values expected: "T1", "T2", "T3", "T4" (or variants).
+// Canonical values: "T1", "T2", "T3", "T4" — but we also accept and pass
+// through any other tier name HubSpot uses (Bronze/Silver/Gold, SMB/Mid/Ent…)
+// so the dashboard doesn't silently drop them.
 // -----------------------------------------------------------------------------
 
 export const TIERS = ["T1", "T2", "T3", "T4"] as const
-export type Tier = (typeof TIERS)[number]
+export type Tier = string  // widened — the raw HubSpot value is kept as-is
 
-export function normalizeTier(raw: string | null | undefined): Tier | null {
+// Normalize a HubSpot tier value. If it clearly maps to T1..T4 (contains a
+// matching digit), returns that canonical label. Otherwise returns the raw
+// string trimmed — never null when input is non-empty.
+export function normalizeTier(raw: string | null | undefined): string | null {
   if (!raw) return null
-  const v = raw.trim().toUpperCase()
-  // Match "T1", "TIER 1", "1", etc.
-  if (v.includes("1")) return "T1"
-  if (v.includes("2")) return "T2"
-  if (v.includes("3")) return "T3"
-  if (v.includes("4")) return "T4"
-  return null
+  const v = raw.trim()
+  if (!v) return null
+  const upper = v.toUpperCase()
+  if (upper.includes("T1") || upper === "1" || upper.includes("TIER 1")) return "T1"
+  if (upper.includes("T2") || upper === "2" || upper.includes("TIER 2")) return "T2"
+  if (upper.includes("T3") || upper === "3" || upper.includes("TIER 3")) return "T3"
+  if (upper.includes("T4") || upper === "4" || upper.includes("TIER 4")) return "T4"
+  return v
 }
 
 // -----------------------------------------------------------------------------
@@ -378,8 +380,6 @@ export const DEAL_PROPERTIES = [
 ] as const
 
 // Company properties to fetch
-// MRR source: "total_revenue" (= Chiffre d'affaire total in HubSpot)
-// Customer filter: "phase_du_client" (Customer stage) not "lifecyclestage"
 export const COMPANY_PROPERTIES = [
   "name",
   "domain",
@@ -414,9 +414,6 @@ export const COMPANY_PROPERTIES = [
 ] as const
 
 // Customer stage (phase_du_client) — active values for CSM dashboard
-// HubSpot internal values → display labels:
-//   "New" → Signed | "To come" → Engaged | "Onboarding" → Onboarding
-//   "Activated" → Activated | "Run" → Run
 export const ACTIVE_CUSTOMER_STAGES = ["New", "To come", "Onboarding", "Activated", "Run"] as const
 
 export const CUSTOMER_PHASE_LABELS: Record<string, string> = {
@@ -430,16 +427,3 @@ export const CUSTOMER_PHASE_LABELS: Record<string, string> = {
   "Lead": "Lead",
   "Parent company": "Parent company",
 }
-
-// =============================================================================
-// DATA ARCHITECTURE NOTE
-// =============================================================================
-// Customer tracking uses:
-//   - Companies with phase_du_client IN [New, To come, Onboarding, Activated, Run]
-//   - hubspot_owner_id matching CSM_TEAM_IDS for per-CSM breakdown
-//   - total_revenue as the MRR/revenue field ("Chiffre d'affaire total")
-//
-// Deal tracking (Upsell/Churn/Downsell/Renewals) uses:
-//   - Deals in Sales pipeline ("default") with "attribution" property
-//   - Renewal deals identified by "renewall_date" property
-// =============================================================================

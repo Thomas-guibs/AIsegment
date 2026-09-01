@@ -5,7 +5,8 @@
 //   - HubSpot returns history NEWEST → OLDEST. We re-sort ASCENDING here so
 //     valueAt() reads left-to-right and returns the last value at or before T.
 //   - History can be truncated: if it doesn't reach T, valueAt() returns
-//     undefined (the caller must decide whether to skip or backfill).
+//     undefined. When history is entirely empty we fall back to the current
+//     value (synthesized as a single entry anchored at hs_createdate).
 // =============================================================================
 
 import { hubspotFetch } from "./client"
@@ -78,26 +79,48 @@ export async function fetchCompanyHistoryBatch(
         method: "POST",
         body: {
           inputs: batch.map((id) => ({ id })),
-          properties: ["name", "domain"],
+          // Also request current values — used as a fallback when the property
+          // has no history tracking on this HubSpot instance.
+          properties: [
+            "name",
+            "domain",
+            "hs_createdate",
+            ...HISTORY_PROPERTIES,
+          ],
           propertiesWithHistory: [...HISTORY_PROPERTIES],
         },
       }
     )
 
+    // Fallback anchor for synthetic history entries: company createdate or a
+    // very old date. This ensures valueAt() at any T ≥ anchor returns the value.
+    const FALLBACK_ANCHOR = "2000-01-01T00:00:00Z"
+
     for (const r of response.results) {
       const history = r.propertiesWithHistory ?? {}
+      const createdAt = r.properties.hs_createdate ?? FALLBACK_ANCHOR
 
-      const mrr = (history["total_revenue"] ?? [])
+      const mrrHist = (history["total_revenue"] ?? [])
         .map((h) => ({ timestamp: h.timestamp, value: h.value ? Number(h.value) || 0 : 0 }))
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      // If no history but a current value exists, synthesize one entry.
+      const mrr = mrrHist.length === 0 && r.properties.total_revenue
+        ? [{ timestamp: createdAt, value: Number(r.properties.total_revenue) || 0 }]
+        : mrrHist
 
-      const csm = (history["proprietaire_de_l_entreprise__csm_"] ?? [])
+      const csmHist = (history["proprietaire_de_l_entreprise__csm_"] ?? [])
         .map((h) => ({ timestamp: h.timestamp, value: h.value || null }))
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      const csm = csmHist.length === 0 && r.properties.proprietaire_de_l_entreprise__csm_
+        ? [{ timestamp: createdAt, value: r.properties.proprietaire_de_l_entreprise__csm_ }]
+        : csmHist
 
-      const phase = (history["phase_du_client"] ?? [])
+      const phaseHist = (history["phase_du_client"] ?? [])
         .map((h) => ({ timestamp: h.timestamp, value: h.value || null }))
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      const phase = phaseHist.length === 0 && r.properties.phase_du_client
+        ? [{ timestamp: createdAt, value: r.properties.phase_du_client }]
+        : phaseHist
 
       map.set(r.id, {
         id: r.id,

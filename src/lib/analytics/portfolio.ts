@@ -1,9 +1,10 @@
 // =============================================================================
-// Portfolio analytics — spec CALCUL.md §3 §4 §5 §6 (strict)
+// Portfolio analytics — spec CALCUL.md §3 §4 §5 §6
 //
 // Point-in-time reading (spec §2). All three properties are read at the
 // observation instant T:
-//   - MRR              from total_revenue history
+//   - MRR              from total_revenue history (with deal-sum fallback
+//                      when total_revenue is 0/missing — see mrrUnderManagement)
 //   - CSM propriétaire from proprietaire_de_l_entreprise__csm_ history
 //   - Phase du client  from phase_du_client history
 //
@@ -15,7 +16,50 @@
 import type { Deal } from "../types"
 import type { CompanyHistory } from "../hubspot/history"
 import { valueAt } from "../hubspot/history"
-import { ATTRIBUTION, movementDate, isRetainedMovement } from "../constants"
+import { ATTRIBUTION, SALES_STAGES, movementDate, isRetainedMovement } from "../constants"
+
+// Stages where a deal has "landed" (revenue committed)
+const WON_STAGES = new Set<string>([SALES_STAGES.CLOSED_WON, SALES_STAGES.PAIEMENT_RECU])
+
+const ACQUISITION_ATTRIBUTIONS = new Set<string>([
+  ATTRIBUTION.PARTNERS,
+  ATTRIBUTION.HUNT,
+  ATTRIBUTION.INBOUND,
+  ATTRIBUTION.PAID,
+  ATTRIBUTION.EVENT,
+  ATTRIBUTION.PLG,
+])
+
+// Fallback MRR: signed sum of a company's retained deals effective before T.
+//   acquisition + upsell → + amount
+//   churn + downsell     → − amount
+// Only used when total_revenue history is missing or 0 in HubSpot — the spec
+// primary source is total_revenue (§2 §3).
+function mrrFromDeals(companyDeals: Deal[], t: string): number {
+  const tDate = t.slice(0, 10)
+  let total = 0
+  for (const d of companyDeals) {
+    const attr = d.attribution
+    if (!attr) continue
+
+    let effectiveDate: string | null = null
+    if (attr === ATTRIBUTION.UPSELL || attr === ATTRIBUTION.CHURN || attr === ATTRIBUTION.DOWNSELL) {
+      if (!isRetainedMovement(d)) continue
+      effectiveDate = movementDate(d)
+    } else if (ACQUISITION_ATTRIBUTIONS.has(attr)) {
+      if (!WON_STAGES.has(d.stage) || d.amount === 0) continue
+      effectiveDate = d.operationDate ?? d.paymentDate ?? d.closeDate
+    } else {
+      continue
+    }
+    if (!effectiveDate || effectiveDate.slice(0, 10) >= tDate) continue
+
+    const amt = Math.abs(d.amount)
+    if (attr === ATTRIBUTION.CHURN || attr === ATTRIBUTION.DOWNSELL) total -= amt
+    else total += amt
+  }
+  return total
+}
 
 // Phases signifiant "parti" (spec §4 signal 2)
 export const CHURNED_PHASES = ["churn"]
@@ -107,9 +151,13 @@ export function hasExited(
 //   1. CSM connu à T                             — csm_at(T) non vide
 //   2. CSM dans le périmètre demandé
 //   3. MRR à T strictement positif               — mrr_at(T) > 0
+//      Primary source: value_at(total_revenue history, T) — spec §2.
+//      Fallback: signed sum of retained deals effective before T. Used when
+//      total_revenue is 0/missing (common: HubSpot's total_revenue is often
+//      unreliable — spec §4 documents 158 "ghost MRR" cases on 327k€ total,
+//      but the inverse is also common: active accounts with 0 total_revenue).
 //   4. Client déjà facturé                       — earliest date_de_paiement < T
-//      Fallback: company.createdAt < T when payment dates are missing
-//      (pragmatic relaxation — HubSpot's payment dates are uneven).
+//      Fallback: company.createdAt < T when payment dates are missing.
 //   5. Pas sorti du portefeuille (§4)
 export function mrrUnderManagement(
   companies: CompanyHistory[],
@@ -126,15 +174,17 @@ export function mrrUnderManagement(
     if (!csm) continue
     // 2. CSM in scope
     if (csmFilter && csm !== csmFilter) continue
-    // 3. MRR > 0 at T — from total_revenue history (spec §2)
-    const mrr = valueAt(c.mrr, t) ?? 0
+    // 3. MRR > 0 at T — try total_revenue first, fall back to sum of deals
+    const companyDeals = companyDealsMap.get(c.id) ?? []
+    const mrrFromRevenue = valueAt(c.mrr, t) ?? 0
+    const mrr = mrrFromRevenue > 0 ? mrrFromRevenue : mrrFromDeals(companyDeals, t)
     if (mrr <= 0) continue
     // 4. Already billed — earliest date_de_paiement < T, or company createdAt as fallback
     const earlyPay = earliestPayment.get(c.id)
     const billingAnchor = earlyPay ?? (c.createdAt ? c.createdAt.slice(0, 10) : null)
     if (!billingAnchor || billingAnchor >= tDate) continue
     // 5. Not exited (§4)
-    if (hasExited(c, companyDealsMap.get(c.id) ?? [], t, mrr)) continue
+    if (hasExited(c, companyDeals, t, mrr)) continue
 
     out.push({ companyId: c.id, companyName: c.name, mrr, csm })
   }

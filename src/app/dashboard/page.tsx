@@ -177,17 +177,21 @@ function DashboardContent() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-card-border">
-                {METRICS.map((spec) => (
-                  <MetricRows
-                    key={spec.key}
-                    spec={spec}
-                    group={data.metrics[spec.key]}
-                    periods={periodsReversed}
-                    expanded={expanded.has(spec.key)}
-                    onToggle={() => toggleMetric(spec.key)}
-                    onOpenDrawer={openDrawer}
-                  />
-                ))}
+                {METRICS.map((spec) => {
+                  const group = data.metrics?.[spec.key]
+                  if (!group) return null
+                  return (
+                    <MetricRows
+                      key={spec.key}
+                      spec={spec}
+                      group={group}
+                      periods={periodsReversed}
+                      expanded={expanded.has(spec.key)}
+                      onToggle={() => toggleMetric(spec.key)}
+                      onOpenDrawer={openDrawer}
+                    />
+                  )
+                })}
               </tbody>
             </table>
           </div>

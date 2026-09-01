@@ -17,6 +17,12 @@ interface RequestOptions {
   params?: Record<string, string>
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+// HubSpot Search API has a 5 req/s per token limit, "secondly" quota.
+// Batch reads share the same secondly quota. To avoid 429s when many calls
+// happen concurrently (e.g. dashboard + kpis + nrr-trends firing at once),
+// we retry with exponential backoff on 429 (and 5xx as a defensive measure).
 export async function hubspotFetch<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const { method = "GET", body, params } = options
   const url = new URL(`${HUBSPOT_BASE_URL}${endpoint}`)
@@ -27,21 +33,38 @@ export async function hubspotFetch<T>(endpoint: string, options: RequestOptions 
     })
   }
 
-  const response = await fetch(url.toString(), {
-    method,
-    headers: {
-      Authorization: `Bearer ${getAccessToken()}`,
-      "Content-Type": "application/json",
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  })
+  const maxAttempts = 5
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const response = await fetch(url.toString(), {
+      method,
+      headers: {
+        Authorization: `Bearer ${getAccessToken()}`,
+        "Content-Type": "application/json",
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    })
 
-  if (!response.ok) {
+    if (response.ok) return response.json()
+
+    const retryable = response.status === 429 || response.status >= 500
+    if (retryable && attempt < maxAttempts - 1) {
+      // 429 responses may include Retry-After (seconds) — honor it when present,
+      // otherwise use exponential backoff (400ms, 800ms, 1600ms, 3200ms).
+      const retryAfterHeader = response.headers.get("Retry-After")
+      const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : 0
+      const backoffMs = Math.max(retryAfterMs, 400 * 2 ** attempt)
+      // Consume the body so the connection can be reused
+      await response.text().catch(() => {})
+      await sleep(backoffMs)
+      continue
+    }
+
     const errorBody = await response.text().catch(() => "Unknown error")
     throw new Error(`HubSpot API error ${response.status}: ${errorBody}`)
   }
 
-  return response.json()
+  // Unreachable — the loop either returns or throws.
+  throw new Error("HubSpot API: exhausted retries")
 }
 
 // Generic search with automatic pagination

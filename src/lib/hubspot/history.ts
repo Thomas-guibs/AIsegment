@@ -55,7 +55,7 @@ const HISTORY_PROPERTIES = [
   "phase_du_client",
 ] as const
 
-// Fetch company property history by IDs. Batches at 100/call (HubSpot limit).
+// Fetch company property history by IDs.
 export async function fetchCompanyHistoryBatch(
   companyIds: string[]
 ): Promise<Map<string, CompanyHistory>> {
@@ -68,7 +68,8 @@ export async function fetchCompanyHistoryBatch(
     return new Map(cached)
   }
 
-  const batchSize = 100
+  // HubSpot caps batch reads with propertiesWithHistory at 50 (not 100 like regular reads).
+  const batchSize = 50
   for (let i = 0; i < companyIds.length; i += batchSize) {
     const batch = companyIds.slice(i, i + batchSize)
     const response = await hubspotFetch<HubSpotBatchReadResult>(

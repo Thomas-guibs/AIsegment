@@ -52,6 +52,12 @@ interface Diagnostics {
   totalCustomers: number
   passed: number
   mrrTotal: number
+  customerPassed: number
+  customerMrrTotal: number
+  customerExcludedNoCsm: number
+  customerExcludedZeroMrr: number
+  customerExcludedNoBilling: number
+  customerExcludedExited: number
   excludedNoCsm: number
   excludedZeroMrr: number
   excludedNoBilling: number
@@ -244,20 +250,24 @@ function DiagnosticsBanner({ d }: { d: Diagnostics }) {
     d.accountsMrrFromDeals > 0
   if (!anyIssue) return null
 
-  const mrrLabel = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(d.mrrTotal)
+  const mrrLabel = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(d.customerMrrTotal)
   return (
     <details className="card p-3 text-xs">
       <summary className="cursor-pointer text-text-secondary font-medium">
-        Diagnostics — {d.passed} comptes retenus · {mrrLabel} € de MRR sous gestion
+        Diagnostics — {d.customerPassed}/{d.totalCustomers} clients retenus · {mrrLabel} € de MRR sous gestion
         <span className="text-text-muted ml-2">
-          (sur {d.totalConsidered} évalués, {d.totalCustomers} clients actifs)
+          ({d.passed} au total sur {d.totalConsidered} évalués)
         </span>
       </summary>
       <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-text-muted">
-        <DiagRow label="CSM inconnu à T (§3.1)" value={d.excludedNoCsm} />
-        <DiagRow label="MRR ≤ 0 à T (§3.3)" value={d.excludedZeroMrr} />
-        <DiagRow label="Pas encore facturé (§3.4)" value={d.excludedNoBilling} />
-        <DiagRow label="Sorti du portefeuille (§4)" value={d.excludedExited} />
+        <DiagRow label="Clients — CSM inconnu à T" value={d.customerExcludedNoCsm} />
+        <DiagRow label="Clients — MRR ≤ 0 à T" value={d.customerExcludedZeroMrr} />
+        <DiagRow label="Clients — Pas encore facturé" value={d.customerExcludedNoBilling} />
+        <DiagRow label="Clients — Sorti du portefeuille" value={d.customerExcludedExited} />
+        <DiagRow label="Tout — CSM inconnu à T (§3.1)" value={d.excludedNoCsm} />
+        <DiagRow label="Tout — MRR ≤ 0 à T (§3.3)" value={d.excludedZeroMrr} />
+        <DiagRow label="Tout — Pas encore facturé (§3.4)" value={d.excludedNoBilling} />
+        <DiagRow label="Tout — Sorti du portefeuille (§4)" value={d.excludedExited} />
         {d.accountsWithoutBilling > 0 && (
           <DiagRow label="⚠ Aucun deal avec date_de_paiement" value={d.accountsWithoutBilling} />
         )}

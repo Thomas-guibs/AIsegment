@@ -11,6 +11,7 @@
 
 import { hubspotFetch } from "./client"
 import { getCached, setCache } from "../cache"
+import { parseDate } from "../utils"
 
 export interface HistoryEntry<V> {
   timestamp: string // ISO 8601
@@ -64,7 +65,9 @@ export async function fetchCompanyHistoryBatch(
   const map = new Map<string, CompanyHistory>()
   if (companyIds.length === 0) return map
 
-  const cacheKey = `company_history_${companyIds.slice().sort().join(",").slice(0, 200)}_${companyIds.length}`
+  // v3 — backfill_history=true + createdAt anchor. Bumped to invalidate
+  // cached shape from the previous deploy.
+  const cacheKey = `company_history_v3_${companyIds.slice().sort().join(",").slice(0, 200)}_${companyIds.length}`
   const cached = getCached<Array<[string, CompanyHistory]>>(cacheKey)
   if (cached) {
     return new Map(cached)
@@ -122,10 +125,13 @@ export async function fetchCompanyHistoryBatch(
 
     for (const r of response.results) {
       const history = r.propertiesWithHistory ?? {}
-      const createdAt = r.properties.hs_createdate ?? FALLBACK_ANCHOR
+      const createdAtNorm = parseDate(r.properties.hs_createdate)
+      const createdAt = createdAtNorm ?? FALLBACK_ANCHOR
+
+      const isoTs = (h: HubSpotPropertyHistoryItem): string => parseDate(h.timestamp) ?? h.timestamp
 
       const mrrHist = (history["total_revenue"] ?? [])
-        .map((h) => ({ timestamp: h.timestamp, value: h.value ? Number(h.value) || 0 : 0 }))
+        .map((h) => ({ timestamp: isoTs(h), value: h.value ? Number(h.value) || 0 : 0 }))
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
       const mrrCurrent = r.properties.total_revenue
         ? Number(r.properties.total_revenue) || 0
@@ -133,7 +139,7 @@ export async function fetchCompanyHistoryBatch(
       const mrr = backfill(mrrHist, mrrCurrent, createdAt)
 
       const csmHist = (history["proprietaire_de_l_entreprise__csm_"] ?? [])
-        .map((h) => ({ timestamp: h.timestamp, value: (h.value || null) as string | null }))
+        .map((h) => ({ timestamp: isoTs(h), value: (h.value || null) as string | null }))
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
       // CSM history fallback:
       //   1. current value of proprietaire_de_l_entreprise__csm_ (custom field)
@@ -145,7 +151,7 @@ export async function fetchCompanyHistoryBatch(
       const csm = backfill(csmHist, csmCurrent, createdAt)
 
       const phaseHist = (history["phase_du_client"] ?? [])
-        .map((h) => ({ timestamp: h.timestamp, value: (h.value || null) as string | null }))
+        .map((h) => ({ timestamp: isoTs(h), value: (h.value || null) as string | null }))
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
       const phase = backfill(phaseHist, r.properties.phase_du_client ?? null, createdAt)
 
@@ -153,7 +159,7 @@ export async function fetchCompanyHistoryBatch(
         id: r.id,
         name: r.properties.name ?? "",
         domain: r.properties.domain ?? null,
-        createdAt: r.properties.hs_createdate ?? null,
+        createdAt: createdAtNorm,
         mrr,
         csm,
         phase,

@@ -482,12 +482,35 @@ export async function GET(request: NextRequest) {
     // Diagnostics summary for the latest period (spec §9).
     const latestDiag = diagnosticsByPeriod.get(latestPeriodKey) ?? newDiagnostics()
     const latestBucket = mrrByPeriod.get(latestPeriodKey)
+
+    // Customer-focused pass — only iterate the active-customer roster so we
+    // can tell which condition is dropping THIS quarter's paying accounts.
+    const customerHistoryList = activeCompanies
+      .map((c) => historyMap.get(c.id))
+      .filter((h): h is NonNullable<typeof h> => h !== undefined)
+    const customerDiag = newDiagnostics()
+    const customerContribs = mrrUnderManagement(
+      customerHistoryList,
+      earliestPayment,
+      companyDealsMap,
+      periods[periods.length - 1].startIso,
+      undefined,
+      customerDiag
+    )
+    const customerMrr = customerContribs.reduce((s, c) => s + c.mrr, 0)
+
     const diagnostics = {
       period: latestPeriodKey,
       totalConsidered: historyList.length,
       totalCustomers: activeCompanies.length,
       passed: latestBucket?.passedCount ?? 0,
       mrrTotal: Math.round((latestBucket?.total ?? 0) * 100) / 100,
+      customerPassed: customerContribs.length,
+      customerMrrTotal: Math.round(customerMrr * 100) / 100,
+      customerExcludedNoCsm: customerDiag.excludedNoCsm.length,
+      customerExcludedZeroMrr: customerDiag.excludedZeroMrr.length,
+      customerExcludedNoBilling: customerDiag.excludedNoBilling.length,
+      customerExcludedExited: customerDiag.excludedExited.length,
       excludedNoCsm: latestDiag.excludedNoCsm.length,
       excludedZeroMrr: latestDiag.excludedZeroMrr.length,
       excludedNoBilling: latestDiag.excludedNoBilling.length,

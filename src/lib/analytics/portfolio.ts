@@ -1,65 +1,21 @@
 // =============================================================================
-// Portfolio analytics — spec CALCUL.md §3 §4 §5 §6
+// Portfolio analytics — spec CALCUL.md §3 §4 §5 §6 (strict) + §9 diagnostics
 //
 // Point-in-time reading (spec §2). All three properties are read at the
 // observation instant T:
-//   - MRR              from total_revenue history (with deal-sum fallback
-//                      when total_revenue is 0/missing — see mrrUnderManagement)
+//   - MRR              from total_revenue history
 //   - CSM propriétaire from proprietaire_de_l_entreprise__csm_ history
 //   - Phase du client  from phase_du_client history
 //
-// fetchCompanyHistoryBatch already synthesizes a single history entry
-// anchored at hs_createdate when a property has no history tracking enabled
-// on this HubSpot instance — so valueAt(t) still returns a value.
+// fetchCompanyHistoryBatch synthesizes a single history entry anchored at
+// hs_createdate when a property has no history tracking enabled on this
+// HubSpot instance — this is spec §12 `backfill_history: true` behavior.
 // =============================================================================
 
 import type { Deal } from "../types"
 import type { CompanyHistory } from "../hubspot/history"
 import { valueAt } from "../hubspot/history"
-import { ATTRIBUTION, SALES_STAGES, movementDate, isRetainedMovement } from "../constants"
-
-// Stages where a deal has "landed" (revenue committed)
-const WON_STAGES = new Set<string>([SALES_STAGES.CLOSED_WON, SALES_STAGES.PAIEMENT_RECU])
-
-const ACQUISITION_ATTRIBUTIONS = new Set<string>([
-  ATTRIBUTION.PARTNERS,
-  ATTRIBUTION.HUNT,
-  ATTRIBUTION.INBOUND,
-  ATTRIBUTION.PAID,
-  ATTRIBUTION.EVENT,
-  ATTRIBUTION.PLG,
-])
-
-// Fallback MRR: signed sum of a company's retained deals effective before T.
-//   acquisition + upsell → + amount
-//   churn + downsell     → − amount
-// Only used when total_revenue history is missing or 0 in HubSpot — the spec
-// primary source is total_revenue (§2 §3).
-function mrrFromDeals(companyDeals: Deal[], t: string): number {
-  const tDate = t.slice(0, 10)
-  let total = 0
-  for (const d of companyDeals) {
-    const attr = d.attribution
-    if (!attr) continue
-
-    let effectiveDate: string | null = null
-    if (attr === ATTRIBUTION.UPSELL || attr === ATTRIBUTION.CHURN || attr === ATTRIBUTION.DOWNSELL) {
-      if (!isRetainedMovement(d)) continue
-      effectiveDate = movementDate(d)
-    } else if (ACQUISITION_ATTRIBUTIONS.has(attr)) {
-      if (!WON_STAGES.has(d.stage) || d.amount === 0) continue
-      effectiveDate = d.operationDate ?? d.paymentDate ?? d.closeDate
-    } else {
-      continue
-    }
-    if (!effectiveDate || effectiveDate.slice(0, 10) >= tDate) continue
-
-    const amt = Math.abs(d.amount)
-    if (attr === ATTRIBUTION.CHURN || attr === ATTRIBUTION.DOWNSELL) total -= amt
-    else total += amt
-  }
-  return total
-}
+import { ATTRIBUTION, movementDate, isRetainedMovement } from "../constants"
 
 // Phases signifiant "parti" (spec §4 signal 2)
 export const CHURNED_PHASES = ["churn"]
@@ -91,8 +47,7 @@ export function earliestPaymentByCompany(deals: Deal[]): Map<string, string> {
   return map
 }
 
-// Group deals by companyId (needed for §4 exit rule which looks at counted
-// churn deals per company).
+// Group deals by companyId.
 export function dealsByCompany(deals: Deal[]): Map<string, Deal[]> {
   const map = new Map<string, Deal[]>()
   for (const d of deals) {
@@ -111,6 +66,37 @@ export interface MrrContribution {
   csm: string
 }
 
+// -----------------------------------------------------------------------------
+// Diagnostics — spec §9 "rien ne doit disparaître en silence".
+// Six signal families the caller can expose in the API response.
+// -----------------------------------------------------------------------------
+
+export interface Diagnostics {
+  // Comptes exclus par condition (§3)
+  excludedNoCsm: string[]          // condition 1 failed
+  excludedZeroMrr: string[]        // condition 3 failed
+  excludedNoBilling: string[]      // condition 4 failed
+  excludedExited: string[]         // condition 5 failed (§4)
+  // §9 signals
+  accountsWithoutBilling: string[] // MRR + CSM present but no date_de_paiement
+  accountsExitedByPhaseOnly: string[]  // phase=churn but no counted churn deal
+  accountsRetainedWithChurn: string[]  // veto applied — likely mis-attributed downsell
+  accountsInvisibleTruncatedHistory: string[]  // history doesn't reach T
+}
+
+export function newDiagnostics(): Diagnostics {
+  return {
+    excludedNoCsm: [],
+    excludedZeroMrr: [],
+    excludedNoBilling: [],
+    excludedExited: [],
+    accountsWithoutBilling: [],
+    accountsExitedByPhaseOnly: [],
+    accountsRetainedWithChurn: [],
+    accountsInvisibleTruncatedHistory: [],
+  }
+}
+
 // Spec §4: an account has exited the portfolio at T iff any exit signal fires
 // AND the veto (active phase + partial loss) does not apply.
 export function hasExited(
@@ -119,10 +105,10 @@ export function hasExited(
   t: string,
   mrrAtT: number
 ): boolean {
-  const tDate = t.slice(0, 10) // YYYY-MM-DD
+  const tDate = t.slice(0, 10)
 
   // Signal 1: counted churn deals with operationDate strictly before T
-  // (same filters as spec §5: stage + operationDate + non-zero amount).
+  // (same filters as §5: stage + operationDate + non-zero amount).
   const countedChurns = companyDealsAll.filter(
     (d) =>
       d.attribution === ATTRIBUTION.CHURN &&
@@ -146,45 +132,77 @@ export function hasExited(
   return true
 }
 
-// Spec §3: MRR sous gestion at instant T.
+// Spec §3: MRR sous gestion at instant T — strict.
 // Applies the 5 conditions in order:
-//   1. CSM connu à T                             — csm_at(T) non vide
+//   1. CSM connu à T                — csm_at(T) non vide
 //   2. CSM dans le périmètre demandé
-//   3. MRR à T strictement positif               — mrr_at(T) > 0
-//      Primary source: value_at(total_revenue history, T) — spec §2.
-//      Fallback: signed sum of retained deals effective before T. Used when
-//      total_revenue is 0/missing (common: HubSpot's total_revenue is often
-//      unreliable — spec §4 documents 158 "ghost MRR" cases on 327k€ total,
-//      but the inverse is also common: active accounts with 0 total_revenue).
-//   4. Client déjà facturé                       — earliest date_de_paiement < T
-//      Fallback: company.createdAt < T when payment dates are missing.
-//   5. Pas sorti du portefeuille (§4)
+//   3. MRR à T strictement positif  — mrr_at(T) > 0 from total_revenue history
+//   4. Client déjà facturé          — earliest date_de_paiement < 1er du mois
+//   5. Pas sorti du portefeuille    — §4
+//
+// Diagnostics are populated when passed (spec §9).
 export function mrrUnderManagement(
   companies: CompanyHistory[],
   earliestPayment: Map<string, string>,
   companyDealsMap: Map<string, Deal[]>,
   t: string,
-  csmFilter?: string
+  csmFilter?: string,
+  diagnostics?: Diagnostics
 ): MrrContribution[] {
   const tDate = t.slice(0, 10)
   const out: MrrContribution[] = []
   for (const c of companies) {
     // 1. CSM known at T
     const csm = valueAt(c.csm, t)
-    if (!csm) continue
+    if (!csm) {
+      diagnostics?.excludedNoCsm.push(c.id)
+      // History-truncation signal: no CSM ever recorded is different from
+      // "unknown at T because history doesn't reach back that far".
+      if (c.csm.length > 0 && c.csm[0].timestamp > t) {
+        diagnostics?.accountsInvisibleTruncatedHistory.push(c.id)
+      }
+      continue
+    }
     // 2. CSM in scope
     if (csmFilter && csm !== csmFilter) continue
-    // 3. MRR > 0 at T — try total_revenue first, fall back to sum of deals
-    const companyDeals = companyDealsMap.get(c.id) ?? []
-    const mrrFromRevenue = valueAt(c.mrr, t) ?? 0
-    const mrr = mrrFromRevenue > 0 ? mrrFromRevenue : mrrFromDeals(companyDeals, t)
-    if (mrr <= 0) continue
-    // 4. Already billed — earliest date_de_paiement < T, or company createdAt as fallback
+    // 3. MRR > 0 at T (from total_revenue history)
+    const mrr = valueAt(c.mrr, t) ?? 0
+    if (mrr <= 0) {
+      diagnostics?.excludedZeroMrr.push(c.id)
+      continue
+    }
+    // 4. Already billed — earliest date_de_paiement < T
     const earlyPay = earliestPayment.get(c.id)
-    const billingAnchor = earlyPay ?? (c.createdAt ? c.createdAt.slice(0, 10) : null)
-    if (!billingAnchor || billingAnchor >= tDate) continue
+    if (!earlyPay || earlyPay >= tDate) {
+      diagnostics?.excludedNoBilling.push(c.id)
+      if (!earlyPay) diagnostics?.accountsWithoutBilling.push(c.id)
+      continue
+    }
     // 5. Not exited (§4)
-    if (hasExited(c, companyDeals, t, mrr)) continue
+    const companyDeals = companyDealsMap.get(c.id) ?? []
+    if (hasExited(c, companyDeals, t, mrr)) {
+      diagnostics?.excludedExited.push(c.id)
+      // Sub-signal: exited by phase only (no counted churn deal)
+      const hasCountedChurn = companyDeals.some(
+        (d) =>
+          d.attribution === ATTRIBUTION.CHURN &&
+          isRetainedMovement(d) &&
+          d.operationDate! < tDate
+      )
+      if (!hasCountedChurn) diagnostics?.accountsExitedByPhaseOnly.push(c.id)
+      continue
+    }
+
+    // Passed all 5 conditions. Detect "retained despite churn" for §9.
+    if (diagnostics) {
+      const hasCountedChurn = companyDeals.some(
+        (d) =>
+          d.attribution === ATTRIBUTION.CHURN &&
+          isRetainedMovement(d) &&
+          d.operationDate! < tDate
+      )
+      if (hasCountedChurn) diagnostics.accountsRetainedWithChurn.push(c.id)
+    }
 
     out.push({ companyId: c.id, companyName: c.name, mrr, csm })
   }
@@ -208,11 +226,7 @@ export function mrrUnderManagementByCsm(
 
 // Spec §5 default attribution: "owner_at_month_start" — the CSM who owned
 // the company on the 1st of the month of the movement.
-//
-// Fallback chain when no CSM is known at that instant:
-//   1. First CSM ever recorded on the company
-//   2. Deal owner (hubspot_owner_id on the deal itself)
-//   3. null → caller should signal as "unassignable" and skip
+// Fallback chain: first-ever CSM → deal.ownerId → null (skipped, spec §9).
 export function ownerAtMonthStart(
   deal: Deal,
   companyHistory: CompanyHistory | undefined

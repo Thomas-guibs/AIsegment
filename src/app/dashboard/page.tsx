@@ -46,12 +46,26 @@ interface DealBrief {
   tier: string | null
 }
 
+interface Diagnostics {
+  period: string
+  totalActiveCompanies: number
+  excludedNoCsm: number
+  excludedZeroMrr: number
+  excludedNoBilling: number
+  excludedExited: number
+  accountsWithoutBilling: number
+  accountsExitedByPhaseOnly: number
+  accountsRetainedWithChurn: number
+  accountsInvisibleTruncatedHistory: number
+}
+
 interface DashboardResponse {
   periods: Array<{ key: string; label: string; startIso: string }>
   periodType: PeriodType
   calcMethod: CalcMethod
   metrics: Record<MetricKey, MetricGroup>
   deals: Record<string, DealBrief>
+  diagnostics?: Diagnostics
 }
 
 interface MetricSpec {
@@ -95,7 +109,6 @@ function DashboardContent() {
   )
   const { data, loading, error, refetch } = useFetch<DashboardResponse>("/api/dashboard", fetchParams)
 
-  // ALL hooks must be called on every render — no early returns before this line.
   const periodsReversed = useMemo(() => (data?.periods ?? []).slice().reverse(), [data?.periods])
 
   const toggleMetric = (k: MetricKey) => {
@@ -158,6 +171,8 @@ function DashboardContent() {
         </div>
       </div>
 
+      {data?.diagnostics && <DiagnosticsBanner d={data.diagnostics} />}
+
       {loading || !data ? (
         <div className="card skeleton h-[500px]" />
       ) : (
@@ -205,6 +220,58 @@ function DashboardContent() {
           onClose={() => setDrawer(null)}
         />
       )}
+    </div>
+  )
+}
+
+// -----------------------------------------------------------------------------
+// DiagnosticsBanner — spec §9 signals for the latest period
+// Explains WHY companies were excluded from MRR sous gestion.
+// -----------------------------------------------------------------------------
+function DiagnosticsBanner({ d }: { d: Diagnostics }) {
+  const included = d.totalActiveCompanies - d.excludedNoCsm - d.excludedZeroMrr - d.excludedNoBilling - d.excludedExited
+  const anyIssue =
+    d.excludedZeroMrr > 0 ||
+    d.excludedNoCsm > 0 ||
+    d.excludedNoBilling > 0 ||
+    d.accountsWithoutBilling > 0 ||
+    d.accountsExitedByPhaseOnly > 0 ||
+    d.accountsRetainedWithChurn > 0 ||
+    d.accountsInvisibleTruncatedHistory > 0
+  if (!anyIssue) return null
+
+  return (
+    <details className="card p-3 text-xs">
+      <summary className="cursor-pointer text-text-secondary font-medium">
+        Diagnostics — {included}/{d.totalActiveCompanies} comptes dans le MRR sous gestion
+      </summary>
+      <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-text-muted">
+        <DiagRow label="CSM inconnu à T (§3.1)" value={d.excludedNoCsm} />
+        <DiagRow label="MRR ≤ 0 à T (§3.3)" value={d.excludedZeroMrr} />
+        <DiagRow label="Pas encore facturé (§3.4)" value={d.excludedNoBilling} />
+        <DiagRow label="Sorti du portefeuille (§4)" value={d.excludedExited} />
+        {d.accountsWithoutBilling > 0 && (
+          <DiagRow label="⚠ Aucun deal avec date_de_paiement" value={d.accountsWithoutBilling} />
+        )}
+        {d.accountsExitedByPhaseOnly > 0 && (
+          <DiagRow label="⚠ Sorti sur phase seule (deal churn manquant)" value={d.accountsExitedByPhaseOnly} />
+        )}
+        {d.accountsRetainedWithChurn > 0 && (
+          <DiagRow label="⚠ Retenu malgré churn (downsell mal étiqueté ?)" value={d.accountsRetainedWithChurn} />
+        )}
+        {d.accountsInvisibleTruncatedHistory > 0 && (
+          <DiagRow label="⚠ Historique tronqué (§2)" value={d.accountsInvisibleTruncatedHistory} />
+        )}
+      </div>
+    </details>
+  )
+}
+
+function DiagRow({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="truncate">{label}</span>
+      <span className="font-mono text-text-primary">{value}</span>
     </div>
   )
 }

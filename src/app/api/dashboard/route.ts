@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic"
 
 // =============================================================================
 // Dashboard — table centrale (NRR / GRR / Upsell / Churn / Downsell / Renew)
+// Spec CALCUL.md §3 §4 §5 §6 (strict) + §9 diagnostics.
 // =============================================================================
 
 import { NextRequest, NextResponse } from "next/server"
@@ -33,6 +34,8 @@ import {
   ownerAtMonthStart,
   monthlyNrr,
   firstOfMonthUTC,
+  newDiagnostics,
+  type Diagnostics,
 } from "@/lib/analytics/portfolio"
 import {
   startOfMonth,
@@ -239,6 +242,9 @@ export async function GET(request: NextRequest) {
       byTier: Map<string, number>
       byCountry: Map<string, number>
     }>()
+    // Diagnostics (spec §9) — collected on the latest period only.
+    const latestPeriodKey = periods[periods.length - 1].key
+    const diagnosticsByPeriod = new Map<string, Diagnostics>()
     for (const p of periods) {
       const bucket = {
         total: 0,
@@ -246,12 +252,16 @@ export async function GET(request: NextRequest) {
         byTier: new Map<string, number>(),
         byCountry: new Map<string, number>(),
       }
+      const diag = newDiagnostics()
       const contribs = mrrUnderManagement(
         historyList,
         earliestPayment,
         companyDealsMap,
-        p.startIso
+        p.startIso,
+        undefined,
+        diag
       )
+      diagnosticsByPeriod.set(p.key, diag)
       for (const c of contribs) {
         bucket.total += c.mrr
         bucket.byCsm.set(c.csm, (bucket.byCsm.get(c.csm) ?? 0) + c.mrr)
@@ -295,7 +305,7 @@ export async function GET(request: NextRequest) {
       a.dealIds.push(dealId)
     }
 
-    // Upsell / Churn / Downsell
+    // Upsell / Churn / Downsell (spec §5)
     for (const deal of allDeals) {
       if (!isRetainedMovement(deal)) continue
       const attr = deal.attribution
@@ -418,15 +428,12 @@ export async function GET(request: NextRequest) {
       return { id, label, perPeriod }
     }
 
-    // Discover tier values present in the data (so we don't hardcode T1..T4
-    // and miss whatever labels HubSpot actually uses).
     const discoveredTiers = new Set<string>()
     companyMeta.forEach((meta) => {
       if (meta.tier) discoveredTiers.add(meta.tier)
     })
     const tierList = Array.from(discoveredTiers).sort()
 
-    // CSM label: disambiguate when two CSMs share a first name.
     const firstNameCounts = new Map<string, number>()
     for (const c of CHART_CSMS) {
       const first = c.name.split(" ")[0]
@@ -469,12 +476,28 @@ export async function GET(request: NextRequest) {
       renew: buildMetric(renewRow),
     }
 
+    // Diagnostics summary for the latest period (spec §9).
+    const latestDiag = diagnosticsByPeriod.get(latestPeriodKey) ?? newDiagnostics()
+    const diagnostics = {
+      period: latestPeriodKey,
+      totalActiveCompanies: activeCompanies.length,
+      excludedNoCsm: latestDiag.excludedNoCsm.length,
+      excludedZeroMrr: latestDiag.excludedZeroMrr.length,
+      excludedNoBilling: latestDiag.excludedNoBilling.length,
+      excludedExited: latestDiag.excludedExited.length,
+      accountsWithoutBilling: latestDiag.accountsWithoutBilling.length,
+      accountsExitedByPhaseOnly: latestDiag.accountsExitedByPhaseOnly.length,
+      accountsRetainedWithChurn: latestDiag.accountsRetainedWithChurn.length,
+      accountsInvisibleTruncatedHistory: latestDiag.accountsInvisibleTruncatedHistory.length,
+    }
+
     return NextResponse.json({
       periods: periods.map((p) => ({ key: p.key, label: p.label, startIso: p.startIso })),
       periodType,
       calcMethod,
       metrics,
       deals: dealsMap,
+      diagnostics,
     })
   } catch (error) {
     console.error("Dashboard API error:", error)

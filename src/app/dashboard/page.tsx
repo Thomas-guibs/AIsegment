@@ -48,7 +48,10 @@ interface DealBrief {
 
 interface Diagnostics {
   period: string
-  totalActiveCompanies: number
+  totalConsidered: number
+  totalCustomers: number
+  passed: number
+  mrrTotal: number
   excludedNoCsm: number
   excludedZeroMrr: number
   excludedNoBilling: number
@@ -230,7 +233,6 @@ function DashboardContent() {
 // Explains WHY companies were excluded from MRR sous gestion.
 // -----------------------------------------------------------------------------
 function DiagnosticsBanner({ d }: { d: Diagnostics }) {
-  const included = d.totalActiveCompanies - d.excludedNoCsm - d.excludedZeroMrr - d.excludedNoBilling - d.excludedExited
   const anyIssue =
     d.excludedZeroMrr > 0 ||
     d.excludedNoCsm > 0 ||
@@ -238,13 +240,18 @@ function DiagnosticsBanner({ d }: { d: Diagnostics }) {
     d.accountsWithoutBilling > 0 ||
     d.accountsExitedByPhaseOnly > 0 ||
     d.accountsRetainedWithChurn > 0 ||
-    d.accountsInvisibleTruncatedHistory > 0
+    d.accountsInvisibleTruncatedHistory > 0 ||
+    d.accountsMrrFromDeals > 0
   if (!anyIssue) return null
 
+  const mrrLabel = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(d.mrrTotal)
   return (
     <details className="card p-3 text-xs">
       <summary className="cursor-pointer text-text-secondary font-medium">
-        Diagnostics — {included}/{d.totalActiveCompanies} comptes dans le MRR sous gestion
+        Diagnostics — {d.passed} comptes retenus · {mrrLabel} € de MRR sous gestion
+        <span className="text-text-muted ml-2">
+          (sur {d.totalConsidered} évalués, {d.totalCustomers} clients actifs)
+        </span>
       </summary>
       <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-text-muted">
         <DiagRow label="CSM inconnu à T (§3.1)" value={d.excludedNoCsm} />

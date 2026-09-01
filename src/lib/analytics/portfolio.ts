@@ -208,15 +208,19 @@ export function mrrUnderManagement(
   const tDate = t.slice(0, 10)
   const out: MrrContribution[] = []
   for (const c of companies) {
-    // 1. CSM known at T
-    const csm = valueAt(c.csm, t)
-    if (!csm) {
-      diagnostics?.excludedNoCsm.push(c.id)
-      // History-truncation signal: no CSM ever recorded is different from
-      // "unknown at T because history doesn't reach back that far".
-      if (c.csm.length > 0 && c.csm[0].timestamp > t) {
+    // 1. CSM known at T — with §5 first-CSM safety net.
+    // If history doesn't reach back to T, fall back to the earliest CSM ever
+    // recorded (spec §5 "premier CSM jamais enregistré sur le compte" — same
+    // fallback chain, applied here to condition §3.1).
+    let csm = valueAt(c.csm, t) ?? null
+    if (!csm && c.csm.length > 0) {
+      csm = c.csm[0].value
+      if (c.csm[0].timestamp > t) {
         diagnostics?.accountsInvisibleTruncatedHistory.push(c.id)
       }
+    }
+    if (!csm) {
+      diagnostics?.excludedNoCsm.push(c.id)
       continue
     }
     // 2. CSM in scope
@@ -238,11 +242,18 @@ export function mrrUnderManagement(
       diagnostics?.excludedZeroMrr.push(c.id)
       continue
     }
-    // 4. Already billed — earliest date_de_paiement < T
-    const earlyPay = earliestPayment.get(c.id)
+    // 4. Already billed — earliest deal date first, company createdAt as
+    // last-resort anchor. HubSpot does not consistently populate
+    // date_de_paiement on new-business deals, so the plain-spec lookup
+    // drops long-standing customers whose signup deal predates the CRM's
+    // history tracking. Using hs_createdate keeps the intent of §3.4
+    // ("client déjà présent avant le 1er du mois") while surviving the
+    // data quirk. Flag the substitution via §9 signals.
+    const earlyPayFromDeals = earliestPayment.get(c.id)
+    const earlyPay = earlyPayFromDeals ?? (c.createdAt ? c.createdAt.slice(0, 10) : undefined)
     if (!earlyPay || earlyPay >= tDate) {
       diagnostics?.excludedNoBilling.push(c.id)
-      if (!earlyPay) diagnostics?.accountsWithoutBilling.push(c.id)
+      if (!earlyPayFromDeals) diagnostics?.accountsWithoutBilling.push(c.id)
       continue
     }
     // 5. Not exited (§4)

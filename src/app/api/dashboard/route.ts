@@ -241,6 +241,7 @@ export async function GET(request: NextRequest) {
       byCsm: Map<string, number>
       byTier: Map<string, number>
       byCountry: Map<string, number>
+      passedCount: number
     }>()
     // Diagnostics (spec §9) — collected on the latest period only.
     const latestPeriodKey = periods[periods.length - 1].key
@@ -251,6 +252,7 @@ export async function GET(request: NextRequest) {
         byCsm: new Map<string, number>(),
         byTier: new Map<string, number>(),
         byCountry: new Map<string, number>(),
+        passedCount: 0,
       }
       const diag = newDiagnostics()
       const contribs = mrrUnderManagement(
@@ -262,6 +264,7 @@ export async function GET(request: NextRequest) {
         diag
       )
       diagnosticsByPeriod.set(p.key, diag)
+      bucket.passedCount = contribs.length
       for (const c of contribs) {
         bucket.total += c.mrr
         bucket.byCsm.set(c.csm, (bucket.byCsm.get(c.csm) ?? 0) + c.mrr)
@@ -478,9 +481,13 @@ export async function GET(request: NextRequest) {
 
     // Diagnostics summary for the latest period (spec §9).
     const latestDiag = diagnosticsByPeriod.get(latestPeriodKey) ?? newDiagnostics()
+    const latestBucket = mrrByPeriod.get(latestPeriodKey)
     const diagnostics = {
       period: latestPeriodKey,
-      totalActiveCompanies: activeCompanies.length,
+      totalConsidered: historyList.length,
+      totalCustomers: activeCompanies.length,
+      passed: latestBucket?.passedCount ?? 0,
+      mrrTotal: Math.round((latestBucket?.total ?? 0) * 100) / 100,
       excludedNoCsm: latestDiag.excludedNoCsm.length,
       excludedZeroMrr: latestDiag.excludedZeroMrr.length,
       excludedNoBilling: latestDiag.excludedNoBilling.length,

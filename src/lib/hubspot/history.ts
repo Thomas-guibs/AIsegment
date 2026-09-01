@@ -98,6 +98,28 @@ export async function fetchCompanyHistoryBatch(
     // very old date. This ensures valueAt() at any T ≥ anchor returns the value.
     const FALLBACK_ANCHOR = "2000-01-01T00:00:00Z"
 
+    // Backfill: if history entries exist but the earliest one is after
+    // createdAt, prepend a synthetic entry at createdAt with the earliest
+    // known value. Implements spec §12 `backfill_history: true` — makes
+    // valueAt(T) return that earliest value for any T ≥ createdAt, so an
+    // account whose CSM/MRR history HubSpot only started tracking recently
+    // still shows the value it has always had.
+    const backfill = <V>(
+      hist: HistoryEntry<V>[],
+      current: V | null,
+      anchor: string
+    ): HistoryEntry<V>[] => {
+      if (hist.length === 0) {
+        return current != null && current !== ""
+          ? [{ timestamp: anchor, value: current }]
+          : []
+      }
+      if (hist[0].timestamp > anchor) {
+        return [{ timestamp: anchor, value: hist[0].value }, ...hist]
+      }
+      return hist
+    }
+
     for (const r of response.results) {
       const history = r.propertiesWithHistory ?? {}
       const createdAt = r.properties.hs_createdate ?? FALLBACK_ANCHOR
@@ -105,31 +127,27 @@ export async function fetchCompanyHistoryBatch(
       const mrrHist = (history["total_revenue"] ?? [])
         .map((h) => ({ timestamp: h.timestamp, value: h.value ? Number(h.value) || 0 : 0 }))
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-      // If no history but a current value exists, synthesize one entry.
-      const mrr = mrrHist.length === 0 && r.properties.total_revenue
-        ? [{ timestamp: createdAt, value: Number(r.properties.total_revenue) || 0 }]
-        : mrrHist
+      const mrrCurrent = r.properties.total_revenue
+        ? Number(r.properties.total_revenue) || 0
+        : null
+      const mrr = backfill(mrrHist, mrrCurrent, createdAt)
 
       const csmHist = (history["proprietaire_de_l_entreprise__csm_"] ?? [])
-        .map((h) => ({ timestamp: h.timestamp, value: h.value || null }))
+        .map((h) => ({ timestamp: h.timestamp, value: (h.value || null) as string | null }))
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
       // CSM history fallback:
       //   1. current value of proprietaire_de_l_entreprise__csm_ (custom field)
       //   2. hubspot_owner_id (some accounts only have the standard owner)
-      const csmCurrent =
+      const csmCurrent: string | null =
         r.properties.proprietaire_de_l_entreprise__csm_ ??
         r.properties.hubspot_owner_id ??
         null
-      const csm = csmHist.length === 0 && csmCurrent
-        ? [{ timestamp: createdAt, value: csmCurrent }]
-        : csmHist
+      const csm = backfill(csmHist, csmCurrent, createdAt)
 
       const phaseHist = (history["phase_du_client"] ?? [])
-        .map((h) => ({ timestamp: h.timestamp, value: h.value || null }))
+        .map((h) => ({ timestamp: h.timestamp, value: (h.value || null) as string | null }))
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-      const phase = phaseHist.length === 0 && r.properties.phase_du_client
-        ? [{ timestamp: createdAt, value: r.properties.phase_du_client }]
-        : phaseHist
+      const phase = backfill(phaseHist, r.properties.phase_du_client ?? null, createdAt)
 
       map.set(r.id, {
         id: r.id,

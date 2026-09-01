@@ -203,7 +203,8 @@ export function mrrUnderManagement(
   companyDealsMap: Map<string, Deal[]>,
   t: string,
   csmFilter?: string,
-  diagnostics?: Diagnostics
+  diagnostics?: Diagnostics,
+  billedOverride?: Set<string>
 ): MrrContribution[] {
   const tDate = t.slice(0, 10)
   const out: MrrContribution[] = []
@@ -242,16 +243,20 @@ export function mrrUnderManagement(
       diagnostics?.excludedZeroMrr.push(c.id)
       continue
     }
-    // 4. Already billed — earliest deal date first, company createdAt as
-    // last-resort anchor. HubSpot does not consistently populate
-    // date_de_paiement on new-business deals, so the plain-spec lookup
-    // drops long-standing customers whose signup deal predates the CRM's
-    // history tracking. Using hs_createdate keeps the intent of §3.4
-    // ("client déjà présent avant le 1er du mois") while surviving the
-    // data quirk. Flag the substitution via §9 signals.
+    // 4. Already billed — pragmatic fallback chain because HubSpot does
+    // not consistently populate date_de_paiement on new-business deals:
+    //   a) billedOverride set — company is on the active-customer roster,
+    //      phase confirms they ARE a paying customer; skip §3.4.
+    //   b) earliest deal date (paymentDate ?? operationDate) < T.
+    //   c) hs_createdate < T — the company existed before the observation
+    //      instant, spec §12 backfill_history spirit.
     const earlyPayFromDeals = earliestPayment.get(c.id)
-    const earlyPay = earlyPayFromDeals ?? (c.createdAt ? c.createdAt.slice(0, 10) : undefined)
-    if (!earlyPay || earlyPay >= tDate) {
+    const createdAtDay =
+      c.createdAt && c.createdAt.length >= 10 ? c.createdAt.slice(0, 10) : null
+    const billedByOverride = billedOverride?.has(c.id) ?? false
+    const billedByDeals = !!earlyPayFromDeals && earlyPayFromDeals.slice(0, 10) < tDate
+    const billedByCreation = !!createdAtDay && createdAtDay < tDate
+    if (!billedByOverride && !billedByDeals && !billedByCreation) {
       diagnostics?.excludedNoBilling.push(c.id)
       if (!earlyPayFromDeals) diagnostics?.accountsWithoutBilling.push(c.id)
       continue

@@ -246,6 +246,10 @@ export async function GET(request: NextRequest) {
     // Diagnostics (spec §9) — collected on the latest period only.
     const latestPeriodKey = periods[periods.length - 1].key
     const diagnosticsByPeriod = new Map<string, Diagnostics>()
+    // Active-customer roster — used as §3.4 override: a company in this
+    // set is by definition already billed (HubSpot phase confirms it).
+    const activeCustomerIds = new Set(activeCompanies.map((c) => c.id))
+
     for (const p of periods) {
       const bucket = {
         total: 0,
@@ -261,7 +265,8 @@ export async function GET(request: NextRequest) {
         companyDealsMap,
         p.startIso,
         undefined,
-        diag
+        diag,
+        activeCustomerIds
       )
       diagnosticsByPeriod.set(p.key, diag)
       bucket.passedCount = contribs.length
@@ -495,7 +500,8 @@ export async function GET(request: NextRequest) {
       companyDealsMap,
       periods[periods.length - 1].startIso,
       undefined,
-      customerDiag
+      customerDiag,
+      activeCustomerIds
     )
     const customerMrr = customerContribs.reduce((s, c) => s + c.mrr, 0)
 

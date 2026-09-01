@@ -319,6 +319,8 @@ export const CSM_TEAM: CSMMember[] = [
   { id: "78820483", name: "Marthe Potin", role: "CSM", initials: "MP", color: "#EC4899" },
   { id: "31564081", name: "Fatima Hilmi", role: "CSM", initials: "FH", color: "#F97316" },
   { id: "1949410186", name: "Antoine Rivaud", role: "CSM", initials: "AR", color: "#14B8A6" },
+  { id: "34101101", name: "Nora Rodriguez", role: "CSM", initials: "NR", color: "#F59E0B" },
+  { id: "585476561", name: "Thomas Guibert", role: "CSM (founder)", initials: "TG", color: "#3B82F6" },
   { id: "44919918", name: "Thomas Prouveur", role: "COO (backup)", initials: "TP", color: "#64748B" },
 ]
 

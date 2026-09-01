@@ -5,7 +5,7 @@ import { Header } from "@/components/layout/Header"
 import { useFetch } from "@/lib/hooks"
 import { ErrorState } from "@/components/ui/ErrorState"
 import { formatCurrency, formatDateFR, cn } from "@/lib/utils"
-import { ChevronDown, ChevronRight, X, ExternalLink } from "lucide-react"
+import { ChevronDown, ChevronRight, X } from "lucide-react"
 
 type PeriodType = "month" | "quarter" | "year"
 type CalcMethod = "booked" | "billed"
@@ -341,8 +341,24 @@ function MetricRows({
             {periods.map((p) => {
               const cell = entry.row.perPeriod[p.key]
               if (!cell) return <td key={p.key} className="text-right px-4 py-2.5 text-text-muted">—</td>
+              const clickable = cell.dealIds.length > 0
               return (
-                <td key={p.key} className="text-right px-4 py-2.5">
+                <td
+                  key={p.key}
+                  className={cn(
+                    "text-right px-4 py-2.5",
+                    clickable && "cursor-pointer hover:bg-card-hover"
+                  )}
+                  onClick={
+                    clickable
+                      ? () =>
+                          onOpenDrawer(
+                            `${spec.label} · ${isTotal ? "Total" : entry.row.label} · ${p.label}`,
+                            cell.dealIds
+                          )
+                      : undefined
+                  }
+                >
                   <div className="flex flex-col items-end gap-0.5">
                     <span className={cn("font-mono text-[13px]", spec.color)}>
                       {fmtValue(cell, spec)}
@@ -354,19 +370,6 @@ function MetricRows({
                       <span className="text-2xs text-text-muted font-mono">
                         {formatCurrency(cell.value, true)} · {cell.volume}
                       </span>
-                    )}
-                    {cell.dealIds.length > 0 && (
-                      <button
-                        onClick={() =>
-                          onOpenDrawer(
-                            `${spec.label} · ${isTotal ? "Total" : entry.row.label} · ${p.label}`,
-                            cell.dealIds
-                          )
-                        }
-                        className="text-2xs text-accent hover:underline flex items-center gap-0.5"
-                      >
-                        Voir <ExternalLink className="w-2.5 h-2.5" />
-                      </button>
                     )}
                   </div>
                 </td>

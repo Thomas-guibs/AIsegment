@@ -223,6 +223,9 @@ export const CHURN_DOWNSELL_STAGES: string[] = [
 // Date used to attribute a movement to a month (spec §5)
 // -----------------------------------------------------------------------------
 
+// Spec §5 (billed): Upsell is dated by date_de_paiement, Churn/Downsell by
+// date_de_prise_en_compte. An upsell without payment date is NOT billed —
+// it only appears in the Booked view (see movementDateFor).
 export function movementDate(deal: { attribution: string | null; paymentDate: string | null; operationDate: string | null }): string | null {
   if (deal.attribution === ATTRIBUTION.UPSELL) return deal.paymentDate
   return deal.operationDate
@@ -234,10 +237,13 @@ export function movementStages(attribution: string | null): string[] | null {
   return null
 }
 
-export function isRetainedMovement(deal: { attribution: string | null; stage: string; paymentDate: string | null; operationDate: string | null; amount: number }): boolean {
+export function isRetainedMovement(
+  deal: { attribution: string | null; stage: string; paymentDate: string | null; operationDate: string | null; amount: number },
+  method: CalcMethod = "billed"
+): boolean {
   const stages = movementStages(deal.attribution)
   if (!stages || !stages.includes(deal.stage)) return false
-  if (!movementDate(deal)) return false
+  if (!movementDateFor(deal, method)) return false
   if (deal.amount === 0) return false
   return true
 }
@@ -252,8 +258,9 @@ export function movementDateFor(
   deal: { attribution: string | null; paymentDate: string | null; operationDate: string | null },
   method: CalcMethod
 ): string | null {
-  if (method === "booked") return deal.operationDate
-  // billed: upsell by payment, churn/downsell by operation (default spec §5)
+  // booked: everything by operation date (fallback to payment date if missing)
+  if (method === "booked") return deal.operationDate ?? deal.paymentDate
+  // billed: upsell by payment date only, churn/downsell by operation date (spec §5)
   return movementDate(deal)
 }
 

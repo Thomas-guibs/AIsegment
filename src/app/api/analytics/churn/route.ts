@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
     //   - operationDate (date_de_prise_en_compte) present
     //   - amount ≠ 0
     // Bucketing key: operationDate.slice(0, 7)
-    const retainedChurns = enriched.filter(isRetainedMovement)
+    const retainedChurns = enriched.filter((d) => isRetainedMovement(d))
 
     // === 1. Churn par mois / CSM ===
     const monthCsm: Record<string, Record<string, number>> = {}

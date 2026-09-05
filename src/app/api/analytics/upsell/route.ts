@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
     //   - paymentDate (date_de_paiement) present — the money is only acquired once received
     //   - amount ≠ 0
     // Bucketing key: paymentDate.slice(0, 7) → YYYY-MM
-    const retainedUpsells = enriched.filter(isRetainedMovement)
+    const retainedUpsells = enriched.filter((d) => isRetainedMovement(d))
 
     // === 1. Upsell par mois / CSM ===
     const monthCsm: Record<string, Record<string, number>> = {}

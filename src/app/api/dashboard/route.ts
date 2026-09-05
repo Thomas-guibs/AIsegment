@@ -313,9 +313,10 @@ export async function GET(request: NextRequest) {
       a.dealIds.push(dealId)
     }
 
-    // Upsell / Churn / Downsell (spec §5)
+    // Upsell / Churn / Downsell (spec §5) — date rule depends on calcMethod:
+    // billed = upsell by date_de_paiement (strict), booked = date_de_prise_en_compte.
     for (const deal of allDeals) {
-      if (!isRetainedMovement(deal)) continue
+      if (!isRetainedMovement(deal, calcMethod)) continue
       const attr = deal.attribution
       const dt = movementDateFor(deal, calcMethod)
       if (!dt) continue

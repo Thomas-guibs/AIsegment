@@ -382,6 +382,15 @@ export async function GET(request: NextRequest) {
       return 0
     }
 
+    // MRR sous gestion au 1er de la période (spec §3) — pas de deals rattachés,
+    // la valeur est la somme des mrr_at(T) des comptes retenus.
+    const mrrRow = (dim: string, id: string, label: string): Row => {
+      const perPeriod: Record<string, Cell> = {}
+      for (const p of periods) {
+        perPeriod[p.key] = { value: startingMrr(p.key, dim), dealIds: [] }
+      }
+      return { id, label, perPeriod }
+    }
     const nrrRow = (dim: string, id: string, label: string): Row => {
       const perPeriod: Record<string, Cell> = {}
       for (const p of periods) {
@@ -477,6 +486,7 @@ export async function GET(request: NextRequest) {
     })
 
     const metrics = {
+      mrr: buildMetric(mrrRow),
       nrr: buildMetric(nrrRow),
       grr: buildMetric(grrRow),
       upsell: buildMetric((dim, id, label) => movementRow("upsell", dim, id, label)),

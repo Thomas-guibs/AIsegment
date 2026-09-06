@@ -9,7 +9,7 @@ import { ChevronDown, ChevronRight, X } from "lucide-react"
 
 type PeriodType = "month" | "quarter" | "year"
 type CalcMethod = "booked" | "billed"
-type MetricKey = "nrr" | "grr" | "upsell" | "churn" | "downsell" | "renew"
+type MetricKey = "mrr" | "nrr" | "grr" | "upsell" | "churn" | "downsell" | "renew"
 
 interface Cell {
   value: number
@@ -86,6 +86,7 @@ interface MetricSpec {
 }
 
 const METRICS: MetricSpec[] = [
+  { key: "mrr", label: "MRR sous gestion (1er du mois)", format: "eur" },
   { key: "nrr", label: "NRR", format: "pct" },
   { key: "grr", label: "GRR", format: "pct" },
   { key: "upsell", label: "Upsell", format: "eur", color: "text-positive" },

@@ -77,5 +77,6 @@ src/
 - HubSpot deal stage IDs are inverted: `closedlost` constant = actually "Closed Won" in HubSpot. See `constants.ts`.
 - `CSM_TEAM` is hardcoded (7 members: Farah, Antoine de Chanaleilles, Marthe, Fatima, Nora, Thomas Guibert, plus the COO backup). Antoine Rivaud is not a CSM. If team changes, update `constants.ts`.
 - HubSpot v4 associations API returns ids as numbers; v3 endpoints return strings. Always `String()` ids before using them as Map keys (see `enrichDealsWithCompanies`).
+- A deal is frequently associated with two companies: the partner agency that sourced it (lifecycle « Partenaire ») and the end customer. `enrichDealsWithCompanies` picks the customer-lifecycle company first, then the primary association, then the first one — never take `to[0]` blindly or partner-sourced MRR lands on the agency.
 - `code_pays_region` values are lowercase enums (`fr`, `es`, `uk` → GB); `client_revenue_tiers` is a number property (`1`–`4`). Use `normalizeCountry` / `normalizeTier`.
 - In-memory cache (`cache.ts`) is per-instance on serverless — cold starts lose it.

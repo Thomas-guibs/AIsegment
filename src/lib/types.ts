@@ -99,7 +99,8 @@ export interface Deal {
   ownerId: string | null
   createdAt: string | null
   lastModified: string | null
-  companyId?: string
+  companyId?: string        // company carrying the revenue (customer > primary > first)
+  companyIds?: string[]     // every associated company (partner agency + customer…)
   companyName?: string
   companyRevenueTier?: string
   companyCountry?: string

@@ -1,6 +1,6 @@
 import { hubspotSearch, hubspotFetch, type SearchFilterGroup } from "./client"
 import type { HubSpotDeal, Deal } from "../types"
-import { PIPELINES, DEAL_PROPERTIES, CSM_TEAM_IDS, ATTRIBUTION, SALES_STAGES } from "../constants"
+import { PIPELINES, DEAL_PROPERTIES, CSM_TEAM_IDS, ATTRIBUTION, SALES_STAGES, CUSTOMER_LIFECYCLE } from "../constants"
 import { parseNumber, parseDate } from "../utils"
 import { format } from "date-fns"
 
@@ -193,38 +193,58 @@ export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
       const response = await hubspotFetch<{
         results: Array<{
           from: { id: string | number }
-          to: Array<{ toObjectId: string | number }>
+          to: Array<{
+            toObjectId: string | number
+            associationTypes?: Array<{ category: string; typeId: number; label: string | null }>
+          }>
         }>
       }>("/crm/v4/associations/deals/companies/batch/read", {
         method: "POST",
         body: { inputs: batch.map((id) => ({ id })) },
       })
 
+      // A deal is often associated with SEVERAL companies — typically the
+      // partner agency that sourced it AND the end customer. Keep every
+      // candidate; the pick happens once we know each company's lifecycle.
       const companyIds = new Set<string>()
-      const dealToCompany = new Map<string, string>()
+      const dealToCandidates = new Map<string, Array<{ id: string; primary: boolean }>>()
 
       for (const result of response.results) {
-        if (result.to?.[0]) {
-          const companyId = String(result.to[0].toObjectId)
-          dealToCompany.set(String(result.from.id), companyId)
-          companyIds.add(companyId)
-        }
+        const candidates = (result.to ?? []).map((t) => ({
+          id: String(t.toObjectId),
+          // HubSpot deal→company: typeId 5 = « Primary company »
+          primary: (t.associationTypes ?? []).some(
+            (a) => a.typeId === 5 || a.label?.toLowerCase() === "primary"
+          ),
+        }))
+        if (candidates.length === 0) continue
+        dealToCandidates.set(String(result.from.id), candidates)
+        for (const c of candidates) companyIds.add(c.id)
       }
 
       if (companyIds.size > 0) {
         const companiesResponse = await hubspotFetch<{
-          results: Array<{ id: string; properties: { name: string; client_revenue_tiers?: string; code_pays_region?: string } }>
+          results: Array<{
+            id: string
+            properties: {
+              name: string
+              client_revenue_tiers?: string
+              code_pays_region?: string
+              lifecyclestage?: string
+            }
+          }>
         }>("/crm/v3/objects/companies/batch/read", {
           method: "POST",
           body: {
             inputs: Array.from(companyIds).map((id) => ({ id })),
-            properties: ["name", "client_revenue_tiers", "code_pays_region"],
+            properties: ["name", "client_revenue_tiers", "code_pays_region", "lifecyclestage"],
           },
         })
 
         const companyNames = new Map<string, string>()
         const companyTiers = new Map<string, string>()
         const companyCountries = new Map<string, string>()
+        const companyLifecycle = new Map<string, string>()
         for (const company of companiesResponse.results) {
           const cid = String(company.id)
           companyNames.set(cid, company.properties.name)
@@ -234,12 +254,29 @@ export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
           if (company.properties.code_pays_region) {
             companyCountries.set(cid, company.properties.code_pays_region)
           }
+          if (company.properties.lifecyclestage) {
+            companyLifecycle.set(cid, company.properties.lifecyclestage)
+          }
+        }
+
+        // Pick the company that carries the revenue:
+        //   1. a company in lifecycle « Client » (customer)
+        //   2. else the primary association
+        //   3. else the first association returned
+        const pickCompany = (cands: Array<{ id: string; primary: boolean }>): string => {
+          const customer = cands.find((c) => companyLifecycle.get(c.id) === CUSTOMER_LIFECYCLE)
+          if (customer) return customer.id
+          const primary = cands.find((c) => c.primary)
+          if (primary) return primary.id
+          return cands[0].id
         }
 
         for (const deal of deals) {
-          const companyId = dealToCompany.get(deal.id)
-          if (companyId) {
+          const cands = dealToCandidates.get(deal.id)
+          if (cands && cands.length > 0) {
+            const companyId = pickCompany(cands)
             deal.companyId = companyId
+            deal.companyIds = cands.map((c) => c.id)
             deal.companyName = companyNames.get(companyId) ?? undefined
             deal.companyRevenueTier = companyTiers.get(companyId) ?? undefined
             deal.companyCountry = companyCountries.get(companyId) ?? undefined

@@ -58,6 +58,8 @@ interface Diagnostics {
   customerExcludedZeroMrr: number
   customerExcludedNoBilling: number
   customerExcludedExited: number
+  dealsWithoutCompany: number
+  dealsTotal: number
   excludedNoCsm: number
   excludedZeroMrr: number
   excludedNoBilling: number
@@ -284,6 +286,12 @@ function DiagnosticsBanner({ d }: { d: Diagnostics }) {
         )}
         {d.accountsMrrFromDeals > 0 && (
           <DiagRow label="ℹ MRR reconstruit depuis les deals" value={d.accountsMrrFromDeals} />
+        )}
+        {d.dealsWithoutCompany > 0 && (
+          <DiagRow
+            label={`⚠ Deals sans company associée (sur ${d.dealsTotal})`}
+            value={d.dealsWithoutCompany}
+          />
         )}
       </div>
     </details>

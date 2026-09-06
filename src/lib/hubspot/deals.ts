@@ -167,10 +167,14 @@ export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
   for (let i = 0; i < dealIds.length; i += batchSize) {
     const batch = dealIds.slice(i, i + batchSize)
     try {
+      // v4 associations API returns ids as NUMBERS (from.id and toObjectId).
+      // Every downstream map (companyMeta, historyMap, dealsByCompany) is
+      // keyed by string ids from v3 endpoints — normalize with String() or
+      // no lookup ever matches and every deal silently loses its company.
       const response = await hubspotFetch<{
         results: Array<{
-          from: { id: string }
-          to: Array<{ toObjectId: string }>
+          from: { id: string | number }
+          to: Array<{ toObjectId: string | number }>
         }>
       }>("/crm/v4/associations/deals/companies/batch/read", {
         method: "POST",
@@ -182,8 +186,9 @@ export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
 
       for (const result of response.results) {
         if (result.to?.[0]) {
-          dealToCompany.set(result.from.id, result.to[0].toObjectId)
-          companyIds.add(result.to[0].toObjectId)
+          const companyId = String(result.to[0].toObjectId)
+          dealToCompany.set(String(result.from.id), companyId)
+          companyIds.add(companyId)
         }
       }
 
@@ -202,12 +207,13 @@ export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
         const companyTiers = new Map<string, string>()
         const companyCountries = new Map<string, string>()
         for (const company of companiesResponse.results) {
-          companyNames.set(company.id, company.properties.name)
+          const cid = String(company.id)
+          companyNames.set(cid, company.properties.name)
           if (company.properties.client_revenue_tiers) {
-            companyTiers.set(company.id, company.properties.client_revenue_tiers)
+            companyTiers.set(cid, company.properties.client_revenue_tiers)
           }
           if (company.properties.code_pays_region) {
-            companyCountries.set(company.id, company.properties.code_pays_region)
+            companyCountries.set(cid, company.properties.code_pays_region)
           }
         }
 
@@ -221,8 +227,10 @@ export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
           }
         }
       }
-    } catch {
-      // Best effort — continue without company names
+    } catch (err) {
+      // Best effort — continue without company data, but never silently:
+      // a failed association read empties every tier/country breakdown.
+      console.error("enrichDealsWithCompanies: association batch failed", err)
     }
   }
 

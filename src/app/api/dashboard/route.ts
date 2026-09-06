@@ -528,6 +528,10 @@ export async function GET(request: NextRequest) {
       customerExcludedZeroMrr: customerDiag.excludedZeroMrr.length,
       customerExcludedNoBilling: customerDiag.excludedNoBilling.length,
       customerExcludedExited: customerDiag.excludedExited.length,
+      // Deals with no company association — they can't be bucketed by tier/country
+      // and don't contribute to deal-derived MRR (§9: mouvements écartés).
+      dealsWithoutCompany: allDeals.filter((d) => !d.companyId).length,
+      dealsTotal: allDeals.length,
       excludedNoCsm: latestDiag.excludedNoCsm.length,
       excludedZeroMrr: latestDiag.excludedZeroMrr.length,
       excludedNoBilling: latestDiag.excludedNoBilling.length,

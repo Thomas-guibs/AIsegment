@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic"
 
 import { NextRequest, NextResponse } from "next/server"
 import { fetchCustomerCompanies } from "@/lib/hubspot/companies"
-import { fetchAttributionDeals, enrichDealsWithCompanies, fetchPaidDeals } from "@/lib/hubspot/deals"
+import { fetchAttributionDeals, enrichDealsWithCompanies, fetchWonDeals } from "@/lib/hubspot/deals"
 import { fetchCompanyHistoryBatch } from "@/lib/hubspot/history"
 import {
   ATTRIBUTION,
@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
     const wideFrom = "2010-01-01"
     const wideTo = format(now, "yyyy-MM-dd")
 
-    const [activeCompanies, allAttributedDealsRaw, paidDealsRaw] = await Promise.all([
+    const [activeCompanies, allAttributedDealsRaw, wonDealsRaw] = await Promise.all([
       fetchCustomerCompanies(),
       fetchAttributionDeals(
         [
@@ -125,24 +125,24 @@ export async function GET(request: NextRequest) {
         wideFrom,
         wideTo
       ),
-      fetchPaidDeals(),
+      fetchWonDeals(),
     ])
     const allDeals = await enrichDealsWithCompanies(allAttributedDealsRaw)
-    const paidDeals = await enrichDealsWithCompanies(paidDealsRaw)
+    const wonDeals = await enrichDealsWithCompanies(wonDealsRaw)
 
     const companyIdSet = new Set<string>()
     for (const c of activeCompanies) companyIdSet.add(c.id)
     for (const d of allDeals) if (d.companyId) companyIdSet.add(d.companyId)
-    for (const d of paidDeals) if (d.companyId) companyIdSet.add(d.companyId)
+    for (const d of wonDeals) if (d.companyId) companyIdSet.add(d.companyId)
 
     const historyMap = await fetchCompanyHistoryBatch(Array.from(companyIdSet))
     const historyList = Array.from(historyMap.values())
 
-    const paidByCompany = dealsByCompany(paidDeals)
+    const wonByCompany = dealsByCompany(wonDeals)
 
     const mrrByCsmMonth = new Map<string, Map<string, number>>()
     for (const m of months) {
-      const contribs = mrrUnderManagement(historyList, paidByCompany, m.tIso)
+      const contribs = mrrUnderManagement(historyList, wonByCompany, m.tIso)
       for (const c of contribs) {
         if (!mrrByCsmMonth.has(c.csm)) mrrByCsmMonth.set(c.csm, new Map())
         const csmMap = mrrByCsmMonth.get(c.csm)!

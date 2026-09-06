@@ -5,14 +5,16 @@
 // prévue par CALCUL.md §3.3, parce que ce champ HubSpot n'intègre pas les
 // downsells :
 //
-//   MRR(company, T) = Σ amount (signé) des transactions en stage
-//                     « Paiement reçu » dont la date effective est < T
+//   MRR(company, T) = Σ amount (signé) des transactions gagnées
+//                     (Closed Won + Paiement reçu) dont la date effective < T
 //
 //   Un compte entre dans le MRR sous gestion à T si :
 //     1. un CSM est connu à T (historique point-in-time, spec §2 / §5)
 //     2. (filtre optionnel) ce CSM est dans le périmètre demandé
 //     3. sa phase_du_client à T ∈ {Onboarding, Activated, Run, Parent company}
-//     4. son MRR à T est strictement positif
+//     4. au moins une transaction rattachée porte une date_de_paiement < T
+//        (la date_de_paiement de la company n'est pas fiable)
+//     5. son MRR à T est strictement positif
 //
 // `amount` porte le delta de MRR (négatif pour churn / downsell, spec §5),
 // donc la somme signée donne directement le MRR net — sans recourir à
@@ -50,27 +52,49 @@ export function dealsByCompany(deals: Deal[]): Map<string, Deal[]> {
   return map
 }
 
-// Date effective d'une transaction payée : date de paiement, sinon date de
+// Stages « gagnés » dont le montant compte dans le MRR d'un compte.
+export const WON_STAGES = new Set<string>([SALES_STAGES.CLOSED_WON, SALES_STAGES.PAIEMENT_RECU])
+
+// Date effective d'une transaction gagnée : date de paiement, sinon date de
 // prise en compte, sinon date de clôture HubSpot.
-export function paidDealEffectiveDate(d: Deal): string | null {
+export function wonDealEffectiveDate(d: Deal): string | null {
   return d.paymentDate ?? d.operationDate ?? d.closeDate ?? null
 }
 
-// Σ amount signé des transactions « Paiement reçu » effectives avant T.
-// Retourne aussi les ids retenus pour alimenter le drawer.
-export function paidMrrAt(deals: Deal[], t: string): { mrr: number; dealIds: string[] } {
+// Le compte est-il facturé à T ? Au moins une transaction rattachée porte
+// une date_de_paiement antérieure à T. (La date_de_paiement de la company
+// n'est pas fiable — celle des transactions fait foi.)
+export function hasPaymentBefore(deals: Deal[], t: string): boolean {
+  const tDate = t.slice(0, 10)
+  return deals.some((d) => d.paymentDate && d.paymentDate.slice(0, 10) < tDate)
+}
+
+// Σ amount signé des transactions gagnées (Closed Won + Paiement reçu)
+// effectives avant T. Les transactions gagnées mais pas encore passées en
+// Paiement reçu comptent — c'est du MRR contractualisé — et sont listées à
+// part (unpaidDealIds) pour la transparence.
+export function wonMrrAt(
+  deals: Deal[],
+  t: string
+): { mrr: number; dealIds: string[]; unpaidDealIds: string[]; unpaidMrr: number } {
   const tDate = t.slice(0, 10)
   let mrr = 0
+  let unpaidMrr = 0
   const dealIds: string[] = []
+  const unpaidDealIds: string[] = []
   for (const d of deals) {
-    if (d.stage !== SALES_STAGES.PAIEMENT_RECU) continue
+    if (!WON_STAGES.has(d.stage)) continue
     if (!d.amount) continue
-    const date = paidDealEffectiveDate(d)
+    const date = wonDealEffectiveDate(d)
     if (!date || date.slice(0, 10) >= tDate) continue
     mrr += d.amount
     dealIds.push(d.id)
+    if (!d.paymentDate) {
+      unpaidMrr += d.amount
+      unpaidDealIds.push(d.id)
+    }
   }
-  return { mrr, dealIds }
+  return { mrr, dealIds, unpaidDealIds, unpaidMrr }
 }
 
 export interface MrrContribution {
@@ -79,6 +103,8 @@ export interface MrrContribution {
   mrr: number
   csm: string
   dealIds: string[]
+  unpaidDealIds: string[]
+  unpaidMrr: number
 }
 
 // -----------------------------------------------------------------------------
@@ -88,8 +114,10 @@ export interface MrrContribution {
 export interface Diagnostics {
   excludedNoCsm: string[]        // condition 1 — aucun CSM connu à T
   excludedPhase: string[]        // condition 3 — phase hors périmètre à T
-  excludedZeroMrr: string[]      // condition 4 — Σ paiement reçu ≤ 0 à T
-  accountsNoPaidDeals: string[]  // phase OK mais aucune transaction payée avant T
+  excludedNoPayment: string[]    // condition 4 — aucune transaction avec date_de_paiement < T
+  excludedZeroMrr: string[]      // condition 5 — Σ transactions gagnées ≤ 0 à T
+  accountsNoWonDeals: string[]   // phase OK mais aucune transaction gagnée rattachée
+  accountsWithUnpaidWon: string[] // retenus avec du Closed Won pas encore payé
   accountsInvisibleTruncatedHistory: string[]  // CSM pris sur le 1er historique (spec §2)
 }
 
@@ -97,18 +125,20 @@ export function newDiagnostics(): Diagnostics {
   return {
     excludedNoCsm: [],
     excludedPhase: [],
+    excludedNoPayment: [],
     excludedZeroMrr: [],
-    accountsNoPaidDeals: [],
+    accountsNoWonDeals: [],
+    accountsWithUnpaidWon: [],
     accountsInvisibleTruncatedHistory: [],
   }
 }
 
 // MRR sous gestion à l'instant T.
-//   companies      — historiques point-in-time (CSM, phase)
-//   paidByCompany  — transactions « Paiement reçu » groupées par companyId
+//   companies     — historiques point-in-time (CSM, phase)
+//   wonByCompany  — transactions gagnées (Closed Won + Paiement reçu) par companyId
 export function mrrUnderManagement(
   companies: CompanyHistory[],
-  paidByCompany: Map<string, Deal[]>,
+  wonByCompany: Map<string, Deal[]>,
   t: string,
   csmFilter?: string,
   diagnostics?: Diagnostics
@@ -133,15 +163,21 @@ export function mrrUnderManagement(
       diagnostics?.excludedPhase.push(c.id)
       continue
     }
-    // 4. MRR = Σ paiement reçu < T
-    const paid = paidByCompany.get(c.id) ?? []
-    const { mrr, dealIds } = paidMrrAt(paid, t)
-    if (mrr <= 0) {
-      diagnostics?.excludedZeroMrr.push(c.id)
-      if (dealIds.length === 0) diagnostics?.accountsNoPaidDeals.push(c.id)
+    // 4. Facturé à T — au moins une transaction avec date_de_paiement < T
+    const won = wonByCompany.get(c.id) ?? []
+    if (!hasPaymentBefore(won, t)) {
+      diagnostics?.excludedNoPayment.push(c.id)
+      if (won.length === 0) diagnostics?.accountsNoWonDeals.push(c.id)
       continue
     }
-    out.push({ companyId: c.id, companyName: c.name, mrr, csm, dealIds })
+    // 5. MRR = Σ transactions gagnées effectives < T
+    const { mrr, dealIds, unpaidDealIds, unpaidMrr } = wonMrrAt(won, t)
+    if (mrr <= 0) {
+      diagnostics?.excludedZeroMrr.push(c.id)
+      continue
+    }
+    if (unpaidDealIds.length > 0) diagnostics?.accountsWithUnpaidWon.push(c.id)
+    out.push({ companyId: c.id, companyName: c.name, mrr, csm, dealIds, unpaidDealIds, unpaidMrr })
   }
   return out
 }
@@ -149,11 +185,11 @@ export function mrrUnderManagement(
 // Somme du MRR sous gestion par CSM à T.
 export function mrrUnderManagementByCsm(
   companies: CompanyHistory[],
-  paidByCompany: Map<string, Deal[]>,
+  wonByCompany: Map<string, Deal[]>,
   t: string
 ): Map<string, number> {
   const out = new Map<string, number>()
-  for (const c of mrrUnderManagement(companies, paidByCompany, t)) {
+  for (const c of mrrUnderManagement(companies, wonByCompany, t)) {
     out.set(c.csm, (out.get(c.csm) ?? 0) + c.mrr)
   }
   return out

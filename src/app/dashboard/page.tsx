@@ -58,16 +58,20 @@ interface Diagnostics {
   customerMrrTotal: number
   customerExcludedNoCsm: number
   customerExcludedPhase: number
+  customerExcludedNoPayment: number
   customerExcludedZeroMrr: number
-  customerNoPaidDeals: number
+  customerNoWonDeals: number
+  customerWithUnpaidWon: number
+  customerUnpaidWonMrr: number
   dealsWithoutCompany: number
   dealsTotal: number
-  paidDealsWithoutCompany: number
-  paidDealsTotal: number
+  wonDealsWithoutCompany: number
+  wonDealsTotal: number
   excludedNoCsm: number
   excludedPhase: number
+  excludedNoPayment: number
   excludedZeroMrr: number
-  accountsNoPaidDeals: number
+  accountsNoWonDeals: number
   accountsInvisibleTruncatedHistory: number
 }
 
@@ -246,13 +250,16 @@ function DiagnosticsBanner({ d }: { d: Diagnostics }) {
   const anyIssue =
     d.customerExcludedNoCsm > 0 ||
     d.customerExcludedPhase > 0 ||
+    d.customerExcludedNoPayment > 0 ||
     d.customerExcludedZeroMrr > 0 ||
+    d.customerWithUnpaidWon > 0 ||
     d.accountsInvisibleTruncatedHistory > 0 ||
     d.dealsWithoutCompany > 0 ||
-    d.paidDealsWithoutCompany > 0
+    d.wonDealsWithoutCompany > 0
   if (!anyIssue) return null
 
-  const mrrLabel = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(d.customerMrrTotal)
+  const fmt = (n: number) => new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(n)
+  const mrrLabel = fmt(d.customerMrrTotal)
   return (
     <details className="card p-3 text-xs">
       <summary className="cursor-pointer text-text-secondary font-medium">
@@ -264,19 +271,28 @@ function DiagnosticsBanner({ d }: { d: Diagnostics }) {
       <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-text-muted">
         <DiagRow label="Clients — CSM inconnu à T" value={d.customerExcludedNoCsm} />
         <DiagRow label="Clients — Phase hors périmètre à T" value={d.customerExcludedPhase} />
-        <DiagRow label="Clients — Σ paiement reçu ≤ 0" value={d.customerExcludedZeroMrr} />
-        <DiagRow label="Clients — Aucune transaction payée" value={d.customerNoPaidDeals} />
+        <DiagRow label="Clients — Aucune date de paiement < T" value={d.customerExcludedNoPayment} />
+        <DiagRow label="Clients — Σ transactions gagnées ≤ 0" value={d.customerExcludedZeroMrr} />
         <DiagRow label="Tout — CSM inconnu à T" value={d.excludedNoCsm} />
         <DiagRow label="Tout — Phase hors périmètre à T" value={d.excludedPhase} />
-        <DiagRow label="Tout — Σ paiement reçu ≤ 0" value={d.excludedZeroMrr} />
-        <DiagRow label="Tout — Aucune transaction payée" value={d.accountsNoPaidDeals} />
+        <DiagRow label="Tout — Aucune date de paiement < T" value={d.excludedNoPayment} />
+        <DiagRow label="Tout — Σ transactions gagnées ≤ 0" value={d.excludedZeroMrr} />
+        {d.customerNoWonDeals > 0 && (
+          <DiagRow label="⚠ Clients sans aucune transaction gagnée rattachée" value={d.customerNoWonDeals} />
+        )}
+        {d.customerWithUnpaidWon > 0 && (
+          <DiagRow
+            label={`ℹ Clients avec du Closed Won pas encore payé (${fmt(d.customerUnpaidWonMrr)} € inclus)`}
+            value={d.customerWithUnpaidWon}
+          />
+        )}
         {d.accountsInvisibleTruncatedHistory > 0 && (
           <DiagRow label="⚠ CSM pris sur le 1er historique (§2)" value={d.accountsInvisibleTruncatedHistory} />
         )}
-        {d.paidDealsWithoutCompany > 0 && (
+        {d.wonDealsWithoutCompany > 0 && (
           <DiagRow
-            label={`⚠ Paiements reçus sans company (sur ${d.paidDealsTotal})`}
-            value={d.paidDealsWithoutCompany}
+            label={`⚠ Transactions gagnées sans company (sur ${d.wonDealsTotal})`}
+            value={d.wonDealsWithoutCompany}
           />
         )}
         {d.dealsWithoutCompany > 0 && (

@@ -11,7 +11,7 @@ import {
   fetchAttributionDeals,
   enrichDealsWithCompanies,
   fetchRenewalDeals,
-  fetchWonDeals,
+  fetchPaidDeals,
 } from "@/lib/hubspot/deals"
 import { fetchCompanyHistoryBatch } from "@/lib/hubspot/history"
 import type { Deal } from "@/lib/types"
@@ -167,7 +167,7 @@ export async function GET(request: NextRequest) {
     const wideFrom = "2010-01-01"
     const wideTo = format(new Date(), "yyyy-MM-dd")
 
-    const [activeCompanies, allAttributedDealsRaw, renewalDealsRaw, wonDealsRaw] = await Promise.all([
+    const [activeCompanies, allAttributedDealsRaw, renewalDealsRaw, paidDealsRaw] = await Promise.all([
       fetchCustomerCompanies(),
       fetchAttributionDeals(
         [
@@ -185,21 +185,21 @@ export async function GET(request: NextRequest) {
         wideTo
       ),
       fetchRenewalDeals(format(rangeStart, "yyyy-MM-dd"), format(rangeEnd, "yyyy-MM-dd")),
-      fetchWonDeals(),
+      fetchPaidDeals(),
     ])
     const allDeals = await enrichDealsWithCompanies(allAttributedDealsRaw)
     const renewalDeals = await enrichDealsWithCompanies(renewalDealsRaw)
-    // Transactions gagnées (Closed Won + Paiement reçu) — source du MRR sous gestion.
-    const wonDeals = await enrichDealsWithCompanies(wonDealsRaw)
+    // Transactions « Paiement reçu » — source du MRR sous gestion.
+    const paidDeals = await enrichDealsWithCompanies(paidDealsRaw)
 
     const companyIdSet = new Set<string>()
     for (const c of activeCompanies) companyIdSet.add(c.id)
     for (const d of allDeals) if (d.companyId) companyIdSet.add(d.companyId)
     for (const d of renewalDeals) if (d.companyId) companyIdSet.add(d.companyId)
-    for (const d of wonDeals) if (d.companyId) companyIdSet.add(d.companyId)
+    for (const d of paidDeals) if (d.companyId) companyIdSet.add(d.companyId)
     const historyMap = await fetchCompanyHistoryBatch(Array.from(companyIdSet))
     const historyList = Array.from(historyMap.values())
-    const wonByCompany = dealsByCompany(wonDeals)
+    const paidByCompany = dealsByCompany(paidDeals)
 
     const companyMeta = new Map<
       string,
@@ -211,7 +211,7 @@ export async function GET(request: NextRequest) {
         country: normalizeCountry(c.country),
       })
     }
-    for (const d of [...allDeals, ...renewalDeals, ...wonDeals]) {
+    for (const d of [...allDeals, ...renewalDeals, ...paidDeals]) {
       if (!d.companyId) continue
       if (!companyMeta.has(d.companyId)) {
         companyMeta.set(d.companyId, {
@@ -269,7 +269,7 @@ export async function GET(request: NextRequest) {
         bucket.dealIdsByDim.set(dim, arr)
       }
       const diag = newDiagnostics()
-      const contribs = mrrUnderManagement(historyList, wonByCompany, p.startIso, undefined, diag)
+      const contribs = mrrUnderManagement(historyList, paidByCompany, p.startIso, undefined, diag)
       diagnosticsByPeriod.set(p.key, diag)
       bucket.passedCount = contribs.length
       for (const c of contribs) {
@@ -282,8 +282,8 @@ export async function GET(request: NextRequest) {
       }
       mrrByPeriod.set(p.key, bucket)
     }
-    // Every won deal that contributes somewhere must be resolvable by the drawer.
-    for (const d of wonDeals) if (d.companyId) dealsMap[d.id] = briefOf(d)
+    // Every paid deal that contributes somewhere must be resolvable by the drawer.
+    for (const d of paidDeals) if (d.companyId) dealsMap[d.id] = briefOf(d)
 
     interface Agg {
       value: number
@@ -530,7 +530,7 @@ export async function GET(request: NextRequest) {
     const customerDiag = newDiagnostics()
     const customerContribs = mrrUnderManagement(
       customerHistoryList,
-      wonByCompany,
+      paidByCompany,
       periods[periods.length - 1].startIso,
       undefined,
       customerDiag
@@ -546,25 +546,19 @@ export async function GET(request: NextRequest) {
       customerPassed: customerContribs.length,
       customerMrrTotal: Math.round(customerMrr * 100) / 100,
       customerExcludedNoCsm: customerDiag.excludedNoCsm.length,
-      customerExcludedPhase: customerDiag.excludedPhase.length,
-      customerExcludedNoPayment: customerDiag.excludedNoPayment.length,
+      customerExcludedNotCustomer: customerDiag.excludedNotCustomer.length,
       customerExcludedZeroMrr: customerDiag.excludedZeroMrr.length,
-      customerNoWonDeals: customerDiag.accountsNoWonDeals.length,
-      // Won-but-not-yet-paid deals counted for paying customers (contracted MRR).
-      customerWithUnpaidWon: customerDiag.accountsWithUnpaidWon.length,
-      customerUnpaidWonMrr:
-        Math.round(customerContribs.reduce((s, c) => s + c.unpaidMrr, 0) * 100) / 100,
+      customerNoPaidDeals: customerDiag.accountsNoPaidDeals.length,
       // Deals with no company association — they can't be bucketed by tier/country
-      // and won deals without a company never reach the MRR (§9: mouvements écartés).
+      // and paid deals without a company never reach the MRR (§9: mouvements écartés).
       dealsWithoutCompany: allDeals.filter((d) => !d.companyId).length,
       dealsTotal: allDeals.length,
-      wonDealsWithoutCompany: wonDeals.filter((d) => !d.companyId).length,
-      wonDealsTotal: wonDeals.length,
+      paidDealsWithoutCompany: paidDeals.filter((d) => !d.companyId).length,
+      paidDealsTotal: paidDeals.length,
       excludedNoCsm: latestDiag.excludedNoCsm.length,
-      excludedPhase: latestDiag.excludedPhase.length,
-      excludedNoPayment: latestDiag.excludedNoPayment.length,
+      excludedNotCustomer: latestDiag.excludedNotCustomer.length,
       excludedZeroMrr: latestDiag.excludedZeroMrr.length,
-      accountsNoWonDeals: latestDiag.accountsNoWonDeals.length,
+      accountsNoPaidDeals: latestDiag.accountsNoPaidDeals.length,
       accountsInvisibleTruncatedHistory: latestDiag.accountsInvisibleTruncatedHistory.length,
     }
 

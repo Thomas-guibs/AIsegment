@@ -102,19 +102,14 @@ export async function fetchCsmMovements(dateFrom: string, dateTo: string, ownerI
   )
 }
 
-// Fetch every won deal — Closed Won (`closedlost`) or Paiement reçu — any
-// attribution. Source of truth for MRR sous gestion: Σ signed amount per
-// company, gated on the company having ≥1 deal with a date_de_paiement.
-export async function fetchWonDeals(): Promise<Deal[]> {
+// Fetch every deal in stage « Paiement reçu » (any attribution) — the source
+// of truth for MRR sous gestion: Σ signed amount per « Client » company.
+export async function fetchPaidDeals(): Promise<Deal[]> {
   const filters: SearchFilterGroup[] = [
     {
       filters: [
         { propertyName: "pipeline", operator: "EQ", value: PIPELINES.SALES },
-        {
-          propertyName: "dealstage",
-          operator: "IN",
-          values: [SALES_STAGES.CLOSED_WON, SALES_STAGES.PAIEMENT_RECU],
-        },
+        { propertyName: "dealstage", operator: "EQ", value: SALES_STAGES.PAIEMENT_RECU },
       ],
     },
   ]
@@ -122,7 +117,7 @@ export async function fetchWonDeals(): Promise<Deal[]> {
     filterGroups: filters,
     properties: [...DEAL_PROPERTIES],
     sorts: [{ propertyName: "hs_lastmodifieddate", direction: "DESCENDING" }],
-  }, "won_deals_all")
+  }, "paid_deals_all")
   return raw.map(transformDeal)
 }
 

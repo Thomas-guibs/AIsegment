@@ -26,6 +26,7 @@ export interface CompanyHistory {
   mrr: HistoryEntry<number>[]        // sorted ASC
   csm: HistoryEntry<string | null>[]  // sorted ASC
   phase: HistoryEntry<string | null>[] // sorted ASC
+  lifecycle: HistoryEntry<string | null>[] // lifecyclestage, sorted ASC ("customer" = Client)
 }
 
 // Returns the value where the last timestamp ≤ t. History MUST be sorted ASC.
@@ -56,6 +57,7 @@ const HISTORY_PROPERTIES = [
   "total_revenue",
   "proprietaire_de_l_entreprise__csm_",
   "phase_du_client",
+  "lifecyclestage",
 ] as const
 
 // Fetch company property history by IDs.
@@ -67,7 +69,7 @@ export async function fetchCompanyHistoryBatch(
 
   // v3 — backfill_history=true + createdAt anchor. Bumped to invalidate
   // cached shape from the previous deploy.
-  const cacheKey = `company_history_v3_${companyIds.slice().sort().join(",").slice(0, 200)}_${companyIds.length}`
+  const cacheKey = `company_history_v4_${companyIds.slice().sort().join(",").slice(0, 200)}_${companyIds.length}`
   const cached = getCached<Array<[string, CompanyHistory]>>(cacheKey)
   if (cached) {
     return new Map(cached)
@@ -155,6 +157,11 @@ export async function fetchCompanyHistoryBatch(
         .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
       const phase = backfill(phaseHist, r.properties.phase_du_client ?? null, createdAt)
 
+      const lifecycleHist = (history["lifecyclestage"] ?? [])
+        .map((h) => ({ timestamp: isoTs(h), value: (h.value || null) as string | null }))
+        .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      const lifecycle = backfill(lifecycleHist, r.properties.lifecyclestage ?? null, createdAt)
+
       map.set(r.id, {
         id: r.id,
         name: r.properties.name ?? "",
@@ -163,6 +170,7 @@ export async function fetchCompanyHistoryBatch(
         mrr,
         csm,
         phase,
+        lifecycle,
       })
     }
   }

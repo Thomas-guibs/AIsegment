@@ -424,8 +424,9 @@ export const COMPANY_PROPERTIES = [
 // Customer stage (phase_du_client) — active values for CSM dashboard
 export const ACTIVE_CUSTOMER_STAGES = ["New", "To come", "Onboarding", "Activated", "Run"] as const
 
-// Phases whose companies count in the MRR sous gestion (read point-in-time).
-export const MRR_PHASES: string[] = ["Onboarding", "Activated", "Run", "Parent company"]
+// lifecyclestage value whose label is « Client » — companies counted in the
+// MRR sous gestion (read point-in-time).
+export const CUSTOMER_LIFECYCLE = "customer"
 
 export const CUSTOMER_PHASE_LABELS: Record<string, string> = {
   "New": "Signed",

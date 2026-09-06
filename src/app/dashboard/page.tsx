@@ -103,11 +103,6 @@ function fmtValue(cell: Cell, spec: MetricSpec): string {
   return formatCurrency(cell.value, true)
 }
 
-function fmtVolume(cell: Cell): string | null {
-  if (cell.volume === undefined || cell.volume === 0) return null
-  return `${cell.volume} deal${cell.volume > 1 ? "s" : ""}`
-}
-
 function DashboardContent() {
   const [periodType, setPeriodType] = useState<PeriodType>("month")
   const [calcMethod, setCalcMethod] = useState<CalcMethod>("billed")
@@ -189,20 +184,26 @@ function DashboardContent() {
       ) : (
         <div className="card p-0 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-[13px] tabular-nums border-separate border-spacing-0">
               <thead>
-                <tr className="border-b border-card-border bg-background/50">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-text-muted sticky left-0 bg-background/50 z-10 min-w-[220px]">
+                <tr>
+                  <th className="text-left px-3 py-2 text-2xs font-medium uppercase tracking-wide text-text-muted sticky left-0 top-0 bg-card z-20 min-w-[200px] border-b border-card-border">
                     Métrique
                   </th>
-                  {periodsReversed.map((p) => (
-                    <th key={p.key} className="text-right px-4 py-3 text-xs font-medium text-text-muted whitespace-nowrap">
+                  {periodsReversed.map((p, i) => (
+                    <th
+                      key={p.key}
+                      className={cn(
+                        "text-right px-3 py-2 text-2xs font-medium uppercase tracking-wide whitespace-nowrap sticky top-0 bg-card z-10 border-b border-card-border",
+                        i === 0 ? "text-text-primary bg-accent/5" : "text-text-muted"
+                      )}
+                    >
                       {p.label}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-card-border">
+              <tbody>
                 {METRICS.map((spec) => {
                   const group = data.metrics?.[spec.key]
                   if (!group) return null
@@ -313,43 +314,77 @@ function MetricRows({
   onToggle: () => void
   onOpenDrawer: (title: string, dealIds: string[]) => void
 }) {
-  const rows: Array<{ row: Row; kind: "total" | "csm" | "tier" | "country"; groupLabel: string }> = []
-  rows.push({ row: group.total, kind: "total", groupLabel: "Total" })
+  type Kind = "total" | "csm" | "tier" | "country"
+  const GROUP_TAG: Record<Kind, string> = { total: "", csm: "CSM", tier: "Tier", country: "Pays" }
+  const rows: Array<{ row: Row; kind: Kind; firstOfGroup: boolean }> = []
+  rows.push({ row: group.total, kind: "total", firstOfGroup: false })
   if (expanded) {
-    for (const r of group.byCsm) rows.push({ row: r, kind: "csm", groupLabel: "CSM" })
-    for (const r of group.byTier) rows.push({ row: r, kind: "tier", groupLabel: "Tier" })
-    for (const r of group.byCountry) rows.push({ row: r, kind: "country", groupLabel: "Pays" })
+    const push = (list: Row[], kind: Kind) =>
+      list.forEach((r, i) => rows.push({ row: r, kind, firstOfGroup: i === 0 }))
+    push(group.byCsm, "csm")
+    push(group.byTier, "tier")
+    push(group.byCountry, "country")
+  }
+
+  // Threshold colouring for retention ratios: ≥100 % positive, 95–100 warning, <95 negative.
+  const pctTone = (pct: number | undefined): string => {
+    if (pct === undefined || pct === null) return "text-text-muted"
+    if (spec.key === "renew") return pct >= 50 ? "text-positive" : "text-warning"
+    if (pct >= 100) return "text-positive"
+    if (pct >= 95) return "text-warning"
+    return "text-negative"
   }
 
   return (
     <>
       {rows.map((entry, idx) => {
         const isTotal = entry.kind === "total"
+        const rowBase = isTotal
+          ? "bg-background/40 font-semibold border-t-2 border-card-border"
+          : cn("text-text-secondary border-t border-card-border/50", entry.firstOfGroup && "border-t-card-border")
         return (
-          <tr key={`${spec.key}-${entry.row.id}-${idx}`} className={cn(isTotal ? "font-semibold" : "text-text-secondary")}>
-            <td className={cn("px-4 py-2.5 sticky left-0 bg-card z-10", !isTotal && "pl-10")}>
-              <div className="flex items-center gap-2">
-                {isTotal && (
-                  <button onClick={onToggle} className="text-text-muted hover:text-text-primary">
-                    {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                  </button>
-                )}
-                <span className={isTotal ? "text-text-primary" : "text-text-secondary"}>
-                  {isTotal ? spec.label : `${spec.label} / ${entry.row.label}`}
-                </span>
-              </div>
+          <tr key={`${spec.key}-${entry.row.id}-${idx}`} className={cn(rowBase, "group/row")}>
+            <td
+              className={cn(
+                "sticky left-0 z-10 px-3 whitespace-nowrap",
+                isTotal ? "py-1.5 bg-background/95 backdrop-blur" : "py-1 pl-8 bg-card"
+              )}
+            >
+              {isTotal ? (
+                <button
+                  onClick={onToggle}
+                  className="flex items-center gap-1.5 text-text-primary hover:text-accent transition-colors"
+                  aria-expanded={expanded}
+                >
+                  {expanded ? <ChevronDown className="w-3.5 h-3.5 text-text-muted" /> : <ChevronRight className="w-3.5 h-3.5 text-text-muted" />}
+                  <span>{spec.label}</span>
+                </button>
+              ) : (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="inline-block w-8 text-2xs uppercase tracking-wide text-text-muted">
+                    {entry.firstOfGroup ? GROUP_TAG[entry.kind] : ""}
+                  </span>
+                  <span className="text-text-secondary">{entry.row.label}</span>
+                </div>
+              )}
             </td>
-            {periods.map((p) => {
+            {periods.map((p, i) => {
               const cell = entry.row.perPeriod[p.key]
-              if (!cell) return <td key={p.key} className="text-right px-4 py-2.5 text-text-muted">—</td>
+              const isCurrent = i === 0
+              const baseTd = cn(
+                "text-right px-3 whitespace-nowrap",
+                isTotal ? "py-1.5" : "py-1 text-xs",
+                isCurrent && "bg-accent/5"
+              )
+              if (!cell) return <td key={p.key} className={cn(baseTd, "text-text-muted")}>—</td>
               const clickable = cell.dealIds.length > 0
+              const volume = spec.format === "eur" ? cell.volume : undefined
+              const isEmptyEur = spec.format === "eur" && cell.value === 0 && !volume
               return (
                 <td
                   key={p.key}
-                  className={cn(
-                    "text-right px-4 py-2.5",
-                    clickable && "cursor-pointer hover:bg-card-hover"
-                  )}
+                  className={cn(baseTd, clickable && "cursor-pointer hover:bg-card-hover")}
+                  title={clickable ? "Voir les transactions" : undefined}
                   onClick={
                     clickable
                       ? () =>
@@ -360,19 +395,24 @@ function MetricRows({
                       : undefined
                   }
                 >
-                  <div className="flex flex-col items-end gap-0.5">
-                    <span className={cn("font-mono text-[13px]", spec.color)}>
-                      {fmtValue(cell, spec)}
+                  <span className="inline-flex items-baseline justify-end gap-1.5">
+                    <span
+                      className={cn(
+                        "font-mono",
+                        spec.format === "pct" ? pctTone(cell.pct) : isEmptyEur ? "text-text-muted" : spec.color
+                      )}
+                    >
+                      {isEmptyEur ? "—" : fmtValue(cell, spec)}
                     </span>
-                    {spec.format === "eur" && fmtVolume(cell) && (
-                      <span className="text-2xs text-text-muted font-mono">{fmtVolume(cell)}</span>
+                    {volume !== undefined && volume > 0 && (
+                      <span className="text-2xs text-text-muted font-mono">×{volume}</span>
                     )}
                     {spec.key === "renew" && cell.volume !== undefined && cell.volume > 0 && (
                       <span className="text-2xs text-text-muted font-mono">
-                        {formatCurrency(cell.value, true)} · {cell.volume}
+                        {formatCurrency(cell.value, true)}·{cell.volume}
                       </span>
                     )}
-                  </div>
+                  </span>
                 </td>
               )
             })}

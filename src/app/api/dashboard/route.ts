@@ -11,6 +11,7 @@ import {
   fetchAttributionDeals,
   enrichDealsWithCompanies,
   fetchRenewalDeals,
+  fetchPaidDeals,
 } from "@/lib/hubspot/deals"
 import { fetchCompanyHistoryBatch } from "@/lib/hubspot/history"
 import type { Deal } from "@/lib/types"
@@ -28,7 +29,6 @@ import {
   COUNTRIES,
 } from "@/lib/constants"
 import {
-  earliestPaymentByCompany,
   dealsByCompany,
   mrrUnderManagement,
   ownerAtMonthStart,
@@ -165,7 +165,7 @@ export async function GET(request: NextRequest) {
     const wideFrom = "2010-01-01"
     const wideTo = format(new Date(), "yyyy-MM-dd")
 
-    const [activeCompanies, allAttributedDealsRaw, renewalDealsRaw] = await Promise.all([
+    const [activeCompanies, allAttributedDealsRaw, renewalDealsRaw, paidDealsRaw] = await Promise.all([
       fetchCustomerCompanies(),
       fetchAttributionDeals(
         [
@@ -183,18 +183,21 @@ export async function GET(request: NextRequest) {
         wideTo
       ),
       fetchRenewalDeals(format(rangeStart, "yyyy-MM-dd"), format(rangeEnd, "yyyy-MM-dd")),
+      fetchPaidDeals(),
     ])
     const allDeals = await enrichDealsWithCompanies(allAttributedDealsRaw)
     const renewalDeals = await enrichDealsWithCompanies(renewalDealsRaw)
+    // Transactions « Paiement reçu » — source du MRR sous gestion.
+    const paidDeals = await enrichDealsWithCompanies(paidDealsRaw)
 
     const companyIdSet = new Set<string>()
     for (const c of activeCompanies) companyIdSet.add(c.id)
     for (const d of allDeals) if (d.companyId) companyIdSet.add(d.companyId)
     for (const d of renewalDeals) if (d.companyId) companyIdSet.add(d.companyId)
+    for (const d of paidDeals) if (d.companyId) companyIdSet.add(d.companyId)
     const historyMap = await fetchCompanyHistoryBatch(Array.from(companyIdSet))
     const historyList = Array.from(historyMap.values())
-    const earliestPayment = earliestPaymentByCompany(allDeals)
-    const companyDealsMap = dealsByCompany(allDeals)
+    const paidByCompany = dealsByCompany(paidDeals)
 
     const companyMeta = new Map<
       string,
@@ -206,7 +209,7 @@ export async function GET(request: NextRequest) {
         country: normalizeCountry(c.country),
       })
     }
-    for (const d of [...allDeals, ...renewalDeals]) {
+    for (const d of [...allDeals, ...renewalDeals, ...paidDeals]) {
       if (!d.companyId) continue
       if (!companyMeta.has(d.companyId)) {
         companyMeta.set(d.companyId, {
@@ -235,50 +238,50 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // MRR under management per (CSM|tier|country, period start)
-    const mrrByPeriod = new Map<string, {
+    // MRR under management per (CSM|tier|country, period start), with the
+    // paid-deal ids behind each figure so the drawer can list them.
+    interface MrrBucket {
       total: number
-      byCsm: Map<string, number>
-      byTier: Map<string, number>
-      byCountry: Map<string, number>
+      byDim: Map<string, number>        // "csm:<id>" | "tier:<T>" | "country:<C>"
+      dealIds: string[]
+      dealIdsByDim: Map<string, string[]>
       passedCount: number
-    }>()
+    }
+    const mrrByPeriod = new Map<string, MrrBucket>()
     // Diagnostics (spec §9) — collected on the latest period only.
     const latestPeriodKey = periods[periods.length - 1].key
     const diagnosticsByPeriod = new Map<string, Diagnostics>()
-    // Active-customer roster — used as §3.4 override: a company in this
-    // set is by definition already billed (HubSpot phase confirms it).
-    const activeCustomerIds = new Set(activeCompanies.map((c) => c.id))
 
     for (const p of periods) {
-      const bucket = {
+      const bucket: MrrBucket = {
         total: 0,
-        byCsm: new Map<string, number>(),
-        byTier: new Map<string, number>(),
-        byCountry: new Map<string, number>(),
+        byDim: new Map(),
+        dealIds: [],
+        dealIdsByDim: new Map(),
         passedCount: 0,
       }
+      const addDim = (dim: string, mrr: number, ids: string[]) => {
+        bucket.byDim.set(dim, (bucket.byDim.get(dim) ?? 0) + mrr)
+        const arr = bucket.dealIdsByDim.get(dim) ?? []
+        arr.push(...ids)
+        bucket.dealIdsByDim.set(dim, arr)
+      }
       const diag = newDiagnostics()
-      const contribs = mrrUnderManagement(
-        historyList,
-        earliestPayment,
-        companyDealsMap,
-        p.startIso,
-        undefined,
-        diag,
-        activeCustomerIds
-      )
+      const contribs = mrrUnderManagement(historyList, paidByCompany, p.startIso, undefined, diag)
       diagnosticsByPeriod.set(p.key, diag)
       bucket.passedCount = contribs.length
       for (const c of contribs) {
         bucket.total += c.mrr
-        bucket.byCsm.set(c.csm, (bucket.byCsm.get(c.csm) ?? 0) + c.mrr)
+        bucket.dealIds.push(...c.dealIds)
+        addDim(`csm:${c.csm}`, c.mrr, c.dealIds)
         const meta = companyMeta.get(c.companyId)
-        if (meta?.tier) bucket.byTier.set(meta.tier, (bucket.byTier.get(meta.tier) ?? 0) + c.mrr)
-        if (meta?.country) bucket.byCountry.set(meta.country, (bucket.byCountry.get(meta.country) ?? 0) + c.mrr)
+        if (meta?.tier) addDim(`tier:${meta.tier}`, c.mrr, c.dealIds)
+        if (meta?.country) addDim(`country:${meta.country}`, c.mrr, c.dealIds)
       }
       mrrByPeriod.set(p.key, bucket)
     }
+    // Every paid deal that contributes somewhere must be resolvable by the drawer.
+    for (const d of paidDeals) if (d.companyId) dealsMap[d.id] = briefOf(d)
 
     interface Agg {
       value: number
@@ -375,19 +378,21 @@ export async function GET(request: NextRequest) {
     const startingMrr = (pk: string, dim: string): number => {
       const b = mrrByPeriod.get(pk)
       if (!b) return 0
-      if (dim === "total") return b.total
-      if (dim.startsWith("csm:")) return b.byCsm.get(dim.slice(4)) ?? 0
-      if (dim.startsWith("tier:")) return b.byTier.get(dim.slice(5)) ?? 0
-      if (dim.startsWith("country:")) return b.byCountry.get(dim.slice(8)) ?? 0
-      return 0
+      return dim === "total" ? b.total : b.byDim.get(dim) ?? 0
+    }
+    const startingMrrDeals = (pk: string, dim: string): string[] => {
+      const b = mrrByPeriod.get(pk)
+      if (!b) return []
+      return dim === "total" ? b.dealIds : b.dealIdsByDim.get(dim) ?? []
     }
 
-    // MRR sous gestion au 1er de la période (spec §3) — pas de deals rattachés,
-    // la valeur est la somme des mrr_at(T) des comptes retenus.
+    // MRR sous gestion au 1er de la période — Σ des transactions « Paiement
+    // reçu » des comptes retenus ; le drawer liste ces transactions.
     const mrrRow = (dim: string, id: string, label: string): Row => {
       const perPeriod: Record<string, Cell> = {}
       for (const p of periods) {
-        perPeriod[p.key] = { value: startingMrr(p.key, dim), dealIds: [] }
+        const ids = startingMrrDeals(p.key, dim)
+        perPeriod[p.key] = { value: startingMrr(p.key, dim), volume: ids.length, dealIds: ids }
       }
       return { id, label, perPeriod }
     }
@@ -507,12 +512,10 @@ export async function GET(request: NextRequest) {
     const customerDiag = newDiagnostics()
     const customerContribs = mrrUnderManagement(
       customerHistoryList,
-      earliestPayment,
-      companyDealsMap,
+      paidByCompany,
       periods[periods.length - 1].startIso,
       undefined,
-      customerDiag,
-      activeCustomerIds
+      customerDiag
     )
     const customerMrr = customerContribs.reduce((s, c) => s + c.mrr, 0)
 
@@ -525,22 +528,20 @@ export async function GET(request: NextRequest) {
       customerPassed: customerContribs.length,
       customerMrrTotal: Math.round(customerMrr * 100) / 100,
       customerExcludedNoCsm: customerDiag.excludedNoCsm.length,
+      customerExcludedPhase: customerDiag.excludedPhase.length,
       customerExcludedZeroMrr: customerDiag.excludedZeroMrr.length,
-      customerExcludedNoBilling: customerDiag.excludedNoBilling.length,
-      customerExcludedExited: customerDiag.excludedExited.length,
+      customerNoPaidDeals: customerDiag.accountsNoPaidDeals.length,
       // Deals with no company association — they can't be bucketed by tier/country
-      // and don't contribute to deal-derived MRR (§9: mouvements écartés).
+      // and paid deals without a company never reach the MRR (§9: mouvements écartés).
       dealsWithoutCompany: allDeals.filter((d) => !d.companyId).length,
       dealsTotal: allDeals.length,
+      paidDealsWithoutCompany: paidDeals.filter((d) => !d.companyId).length,
+      paidDealsTotal: paidDeals.length,
       excludedNoCsm: latestDiag.excludedNoCsm.length,
+      excludedPhase: latestDiag.excludedPhase.length,
       excludedZeroMrr: latestDiag.excludedZeroMrr.length,
-      excludedNoBilling: latestDiag.excludedNoBilling.length,
-      excludedExited: latestDiag.excludedExited.length,
-      accountsWithoutBilling: latestDiag.accountsWithoutBilling.length,
-      accountsExitedByPhaseOnly: latestDiag.accountsExitedByPhaseOnly.length,
-      accountsRetainedWithChurn: latestDiag.accountsRetainedWithChurn.length,
+      accountsNoPaidDeals: latestDiag.accountsNoPaidDeals.length,
       accountsInvisibleTruncatedHistory: latestDiag.accountsInvisibleTruncatedHistory.length,
-      accountsMrrFromDeals: latestDiag.accountsMrrFromDeals.length,
     }
 
     return NextResponse.json({

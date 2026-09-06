@@ -67,11 +67,14 @@ src/
 
 - **Health score** (`lib/scoring/health.ts`): 9 weighted signals (ROI, revenue, product usage, support, activity). Grades: excellent (75+), good (50-74), warning (30-49), critical (<30).
 - **Upsell score** (`lib/scoring/upsell.ts`): 5 signals (sibling brands, stores, languages, MRR, plan). Grades: hot (>70), warm (40-70), cold (<40).
-- **NRR**: Calculated from CSM-attributed deals (upsell, churn, downsell) over a rolling period.
+- **MRR sous gestion** (`lib/analytics/portfolio.ts`): per company at T (1st of month, UTC) = Σ signed `amount` of deals in stage « Paiement reçu » (`SALES_STAGES.PAIEMENT_RECU`) with effective date (`date_de_paiement` → `date_de_prise_en_compte` → `closedate`) < T. Counted only if a CSM is known at T and `phase_du_client` at T ∈ `MRR_PHASES` (Onboarding / Activated / Run / Parent company). Never use `total_revenue` — it ignores downsells. CSM and phase are read point-in-time from HubSpot property history (`lib/hubspot/history.ts`, backfilled to `hs_createdate`).
+- **NRR**: `(MRR_début + upsell − churn − downsell) / MRR_début` per month (spec CALCUL.md §6). Movements attributed to the CSM owning the company on the 1st of the movement's month. Billed mode dates upsells by `date_de_paiement` (strict), booked mode by `date_de_prise_en_compte`.
 - **Enrichment**: Website scraping → SIREN extraction → Pappers cartography BFS → Claude qualification (web_search) → ICP scoring.
 
 ## Known quirks
 
 - HubSpot deal stage IDs are inverted: `closedlost` constant = actually "Closed Won" in HubSpot. See `constants.ts`.
-- `CSM_TEAM` is hardcoded (6 members). If team changes, update `constants.ts`.
+- `CSM_TEAM` is hardcoded (8 members incl. Nora Rodriguez, Thomas Guibert and the COO backup). If team changes, update `constants.ts`.
+- HubSpot v4 associations API returns ids as numbers; v3 endpoints return strings. Always `String()` ids before using them as Map keys (see `enrichDealsWithCompanies`).
+- `code_pays_region` values are lowercase enums (`fr`, `es`, `uk` → GB); `client_revenue_tiers` is a number property (`1`–`4`). Use `normalizeCountry` / `normalizeTier`.
 - In-memory cache (`cache.ts`) is per-instance on serverless — cold starts lose it.

@@ -1,6 +1,6 @@
 import { hubspotSearch, hubspotFetch, type SearchFilterGroup } from "./client"
 import type { HubSpotDeal, Deal } from "../types"
-import { PIPELINES, DEAL_PROPERTIES, CSM_TEAM_IDS, ATTRIBUTION } from "../constants"
+import { PIPELINES, DEAL_PROPERTIES, CSM_TEAM_IDS, ATTRIBUTION, SALES_STAGES } from "../constants"
 import { parseNumber, parseDate } from "../utils"
 import { format } from "date-fns"
 
@@ -100,6 +100,25 @@ export async function fetchCsmMovements(dateFrom: string, dateTo: string, ownerI
     dateTo,
     ownerId
   )
+}
+
+// Fetch every deal in stage « Paiement reçu » (any attribution) — the source
+// of truth for MRR sous gestion: Σ signed amount per company.
+export async function fetchPaidDeals(): Promise<Deal[]> {
+  const filters: SearchFilterGroup[] = [
+    {
+      filters: [
+        { propertyName: "pipeline", operator: "EQ", value: PIPELINES.SALES },
+        { propertyName: "dealstage", operator: "EQ", value: SALES_STAGES.PAIEMENT_RECU },
+      ],
+    },
+  ]
+  const raw = await hubspotSearch<HubSpotDeal>("deals", {
+    filterGroups: filters,
+    properties: [...DEAL_PROPERTIES],
+    sorts: [{ propertyName: "hs_lastmodifieddate", direction: "DESCENDING" }],
+  }, "paid_deals_all")
+  return raw.map(transformDeal)
 }
 
 // Fetch deals with renewals in a date range.

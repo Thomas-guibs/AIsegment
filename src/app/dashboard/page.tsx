@@ -55,20 +55,18 @@ interface Diagnostics {
   customerPassed: number
   customerMrrTotal: number
   customerExcludedNoCsm: number
+  customerExcludedPhase: number
   customerExcludedZeroMrr: number
-  customerExcludedNoBilling: number
-  customerExcludedExited: number
+  customerNoPaidDeals: number
   dealsWithoutCompany: number
   dealsTotal: number
+  paidDealsWithoutCompany: number
+  paidDealsTotal: number
   excludedNoCsm: number
+  excludedPhase: number
   excludedZeroMrr: number
-  excludedNoBilling: number
-  excludedExited: number
-  accountsWithoutBilling: number
-  accountsExitedByPhaseOnly: number
-  accountsRetainedWithChurn: number
+  accountsNoPaidDeals: number
   accountsInvisibleTruncatedHistory: number
-  accountsMrrFromDeals: number
 }
 
 interface DashboardResponse {
@@ -244,14 +242,12 @@ function DashboardContent() {
 // -----------------------------------------------------------------------------
 function DiagnosticsBanner({ d }: { d: Diagnostics }) {
   const anyIssue =
-    d.excludedZeroMrr > 0 ||
-    d.excludedNoCsm > 0 ||
-    d.excludedNoBilling > 0 ||
-    d.accountsWithoutBilling > 0 ||
-    d.accountsExitedByPhaseOnly > 0 ||
-    d.accountsRetainedWithChurn > 0 ||
+    d.customerExcludedNoCsm > 0 ||
+    d.customerExcludedPhase > 0 ||
+    d.customerExcludedZeroMrr > 0 ||
     d.accountsInvisibleTruncatedHistory > 0 ||
-    d.accountsMrrFromDeals > 0
+    d.dealsWithoutCompany > 0 ||
+    d.paidDealsWithoutCompany > 0
   if (!anyIssue) return null
 
   const mrrLabel = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(d.customerMrrTotal)
@@ -265,31 +261,25 @@ function DiagnosticsBanner({ d }: { d: Diagnostics }) {
       </summary>
       <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-text-muted">
         <DiagRow label="Clients — CSM inconnu à T" value={d.customerExcludedNoCsm} />
-        <DiagRow label="Clients — MRR ≤ 0 à T" value={d.customerExcludedZeroMrr} />
-        <DiagRow label="Clients — Pas encore facturé" value={d.customerExcludedNoBilling} />
-        <DiagRow label="Clients — Sorti du portefeuille" value={d.customerExcludedExited} />
-        <DiagRow label="Tout — CSM inconnu à T (§3.1)" value={d.excludedNoCsm} />
-        <DiagRow label="Tout — MRR ≤ 0 à T (§3.3)" value={d.excludedZeroMrr} />
-        <DiagRow label="Tout — Pas encore facturé (§3.4)" value={d.excludedNoBilling} />
-        <DiagRow label="Tout — Sorti du portefeuille (§4)" value={d.excludedExited} />
-        {d.accountsWithoutBilling > 0 && (
-          <DiagRow label="⚠ Aucun deal avec date_de_paiement" value={d.accountsWithoutBilling} />
-        )}
-        {d.accountsExitedByPhaseOnly > 0 && (
-          <DiagRow label="⚠ Sorti sur phase seule (deal churn manquant)" value={d.accountsExitedByPhaseOnly} />
-        )}
-        {d.accountsRetainedWithChurn > 0 && (
-          <DiagRow label="⚠ Retenu malgré churn (downsell mal étiqueté ?)" value={d.accountsRetainedWithChurn} />
-        )}
+        <DiagRow label="Clients — Phase hors périmètre à T" value={d.customerExcludedPhase} />
+        <DiagRow label="Clients — Σ paiement reçu ≤ 0" value={d.customerExcludedZeroMrr} />
+        <DiagRow label="Clients — Aucune transaction payée" value={d.customerNoPaidDeals} />
+        <DiagRow label="Tout — CSM inconnu à T" value={d.excludedNoCsm} />
+        <DiagRow label="Tout — Phase hors périmètre à T" value={d.excludedPhase} />
+        <DiagRow label="Tout — Σ paiement reçu ≤ 0" value={d.excludedZeroMrr} />
+        <DiagRow label="Tout — Aucune transaction payée" value={d.accountsNoPaidDeals} />
         {d.accountsInvisibleTruncatedHistory > 0 && (
-          <DiagRow label="⚠ Historique tronqué (§2)" value={d.accountsInvisibleTruncatedHistory} />
+          <DiagRow label="⚠ CSM pris sur le 1er historique (§2)" value={d.accountsInvisibleTruncatedHistory} />
         )}
-        {d.accountsMrrFromDeals > 0 && (
-          <DiagRow label="ℹ MRR reconstruit depuis les deals" value={d.accountsMrrFromDeals} />
+        {d.paidDealsWithoutCompany > 0 && (
+          <DiagRow
+            label={`⚠ Paiements reçus sans company (sur ${d.paidDealsTotal})`}
+            value={d.paidDealsWithoutCompany}
+          />
         )}
         {d.dealsWithoutCompany > 0 && (
           <DiagRow
-            label={`⚠ Deals sans company associée (sur ${d.dealsTotal})`}
+            label={`⚠ Mouvements sans company (sur ${d.dealsTotal})`}
             value={d.dealsWithoutCompany}
           />
         )}

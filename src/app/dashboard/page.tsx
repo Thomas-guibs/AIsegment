@@ -15,6 +15,8 @@ interface Cell {
   value: number
   volume?: number
   pct?: number
+  lost?: number
+  pending?: number
   dealIds: string[]
 }
 
@@ -92,7 +94,7 @@ const METRICS: MetricSpec[] = [
   { key: "upsell", label: "Upsell", format: "eur", color: "text-positive" },
   { key: "churn", label: "Churn", format: "eur", color: "text-negative" },
   { key: "downsell", label: "Downsell", format: "eur", color: "text-warning" },
-  { key: "renew", label: "Renouvellement", format: "pct" },
+  { key: "renew", label: "Taux de renouvellement", format: "pct" },
 ]
 
 function fmtValue(cell: Cell, spec: MetricSpec): string {
@@ -327,7 +329,7 @@ function MetricRows({
   // Threshold colouring for retention ratios: ≥100 % positive, 95–100 warning, <95 negative.
   const pctTone = (pct: number | undefined): string => {
     if (pct === undefined || pct === null) return "text-text-muted"
-    if (spec.key === "renew") return pct >= 50 ? "text-positive" : "text-warning"
+    if (spec.key === "renew") return pct >= 85 ? "text-positive" : pct >= 70 ? "text-warning" : "text-negative"
     if (pct >= 100) return "text-positive"
     if (pct >= 95) return "text-warning"
     return "text-negative"
@@ -405,9 +407,13 @@ function MetricRows({
                     {volume !== undefined && volume > 0 && (
                       <span className="text-2xs text-text-muted font-mono">×{volume}</span>
                     )}
-                    {spec.key === "renew" && cell.volume !== undefined && cell.volume > 0 && (
-                      <span className="text-2xs text-text-muted font-mono">
-                        {formatCurrency(cell.value, true)}·{cell.volume}
+                    {spec.key === "renew" && (cell.volume ?? 0) + (cell.lost ?? 0) + (cell.pending ?? 0) > 0 && (
+                      <span
+                        className="text-2xs text-text-muted font-mono"
+                        title={`${cell.volume ?? 0} renouvelés · ${cell.lost ?? 0} churn/downsell${cell.pending ? ` · ${cell.pending} en cours` : ""} · ${formatCurrency(cell.value, true)} renouvelés`}
+                      >
+                        {cell.volume ?? 0}/{(cell.volume ?? 0) + (cell.lost ?? 0)}
+                        {cell.pending ? <span className="text-warning"> +{cell.pending}</span> : null}
                       </span>
                     )}
                   </span>

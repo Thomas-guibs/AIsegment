@@ -63,6 +63,8 @@ interface Cell {
   value: number
   volume?: number
   pct?: number
+  lost?: number     // renew: transactions in Churn & Downsell
+  pending?: number  // renew: transactions not yet decided
   dealIds: string[]
 }
 
@@ -297,6 +299,8 @@ export async function GET(request: NextRequest) {
       ["downsell", new Map()],
       ["renewDue", new Map()],
       ["renewWon", new Map()],
+      ["renewLost", new Map()],
+      ["renewPending", new Map()],
     ])
 
     const bumpAgg = (
@@ -343,29 +347,38 @@ export async function GET(request: NextRequest) {
       if (meta?.country) bumpAgg(metricKey, `country:${meta.country}`, pk, amt, deal.id)
     }
 
-    // Renewals — bucket by renewalDate, "won" if stage is a retained "won" stage
+    // Renewals — transactions whose name carries "renewal" / "renewall" and
+    // whose renewall_date (date de reconduction) falls in the period.
+    //   won      = Closed Won (`closedlost`) or Paiement reçu
+    //   lost     = Churn & Downsell stage
+    //   pending  = any other stage (still in negotiation / not yet decided)
+    // Taux de renouvellement = won / (won + lost), by transaction count.
     const RENEW_WON_STAGES = new Set<string>([SALES_STAGES.CLOSED_WON, SALES_STAGES.PAIEMENT_RECU])
+    const RENEW_LOST_STAGES = new Set<string>([SALES_STAGES.CHURN_DOWNSELL])
+    const RENEWAL_NAME = /renew/i
     for (const deal of renewalDeals) {
       if (!deal.renewalDate) continue
+      if (!RENEWAL_NAME.test(deal.name)) continue
       const pk = periodKeyForDate(new Date(deal.renewalDate).toISOString(), periodType)
       if (!periods.some((p) => p.key === pk)) continue
 
       const amt = Math.abs(deal.amount)
-      const csm = ownerAtMonthStart(deal, deal.companyId ? historyMap.get(deal.companyId) : undefined)
+      // Attribution at the 1st of the renewal month (spec §5 owner_at_month_start).
+      const csm = ownerAtMonthStart(deal, deal.companyId ? historyMap.get(deal.companyId) : undefined, deal.renewalDate)
       const meta = deal.companyId ? companyMeta.get(deal.companyId) : undefined
 
       dealsMap[deal.id] = briefOf(deal)
 
-      bumpAgg("renewDue", "total", pk, amt, deal.id)
-      if (csm) bumpAgg("renewDue", `csm:${csm}`, pk, amt, deal.id)
-      if (meta?.tier) bumpAgg("renewDue", `tier:${meta.tier}`, pk, amt, deal.id)
-      if (meta?.country) bumpAgg("renewDue", `country:${meta.country}`, pk, amt, deal.id)
-
-      if (RENEW_WON_STAGES.has(deal.stage)) {
-        bumpAgg("renewWon", "total", pk, amt, deal.id)
-        if (csm) bumpAgg("renewWon", `csm:${csm}`, pk, amt, deal.id)
-        if (meta?.tier) bumpAgg("renewWon", `tier:${meta.tier}`, pk, amt, deal.id)
-        if (meta?.country) bumpAgg("renewWon", `country:${meta.country}`, pk, amt, deal.id)
+      const outcome = RENEW_WON_STAGES.has(deal.stage)
+        ? "renewWon"
+        : RENEW_LOST_STAGES.has(deal.stage)
+          ? "renewLost"
+          : "renewPending"
+      for (const metric of ["renewDue", outcome]) {
+        bumpAgg(metric, "total", pk, amt, deal.id)
+        if (csm) bumpAgg(metric, `csm:${csm}`, pk, amt, deal.id)
+        if (meta?.tier) bumpAgg(metric, `tier:${meta.tier}`, pk, amt, deal.id)
+        if (meta?.country) bumpAgg(metric, `country:${meta.country}`, pk, amt, deal.id)
       }
     }
 
@@ -440,11 +453,16 @@ export async function GET(request: NextRequest) {
       for (const p of periods) {
         const due = getAgg("renewDue", dim, p.key)
         const won = getAgg("renewWon", dim, p.key)
-        const pct = due.value > 0 ? (won.value / due.value) * 100 : null
+        const lost = getAgg("renewLost", dim, p.key)
+        const pending = getAgg("renewPending", dim, p.key)
+        const decided = won.volume + lost.volume
+        const pct = decided > 0 ? (won.volume / decided) * 100 : null
         perPeriod[p.key] = {
           value: won.value,
           volume: won.volume,
           pct: pct ?? undefined,
+          lost: lost.volume,
+          pending: pending.volume,
           dealIds: due.dealIds,
         }
       }

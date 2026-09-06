@@ -69,6 +69,7 @@ src/
 - **Upsell score** (`lib/scoring/upsell.ts`): 5 signals (sibling brands, stores, languages, MRR, plan). Grades: hot (>70), warm (40-70), cold (<40).
 - **MRR sous gestion** (`lib/analytics/portfolio.ts`): per company at T (1st of month, UTC) = Σ signed `amount` of deals in stage « Paiement reçu » (`SALES_STAGES.PAIEMENT_RECU`) with effective date (`date_de_paiement` → `date_de_prise_en_compte` → `closedate`) < T. Counted only if a CSM is known at T and `phase_du_client` at T ∈ `MRR_PHASES` (Onboarding / Activated / Run / Parent company). Never use `total_revenue` — it ignores downsells. CSM and phase are read point-in-time from HubSpot property history (`lib/hubspot/history.ts`, backfilled to `hs_createdate`).
 - **NRR**: `(MRR_début + upsell − churn − downsell) / MRR_début` per month (spec CALCUL.md §6). Movements attributed to the CSM owning the company on the 1st of the movement's month. Billed mode dates upsells by `date_de_paiement` (strict), booked mode by `date_de_prise_en_compte`.
+- **Taux de renouvellement** (dashboard): deals whose name matches `/renew/i` (renewal / renewall) with `renewall_date` in the period. won = Closed Won or Paiement reçu, lost = Churn & Downsell stage, anything else = pending. Rate = won / (won + lost) by transaction count; pending shown separately, never in the denominator.
 - **Enrichment**: Website scraping → SIREN extraction → Pappers cartography BFS → Claude qualification (web_search) → ICP scoring.
 
 ## Known quirks

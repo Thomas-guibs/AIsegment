@@ -22,12 +22,11 @@ export function FilterBar() {
   }
 
   return (
-    <div className="flex items-center gap-3">
-      {/* Period filter */}
+    <div className="flex items-center gap-1.5">
       <select
         value={currentPeriod}
         onChange={(e) => updateParams("period", e.target.value)}
-        className="h-8 px-3 rounded-lg bg-card border border-card-border text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer"
+        className="h-8 px-2.5 rounded-lg bg-background border border-card-border text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50 cursor-pointer"
       >
         {(Object.entries(PERIOD_LABELS) as [PeriodFilter, string][]).map(([value, label]) => (
           <option key={value} value={value}>
@@ -36,11 +35,10 @@ export function FilterBar() {
         ))}
       </select>
 
-      {/* CSM filter */}
       <select
         value={currentCsm}
         onChange={(e) => updateParams("csmId", e.target.value)}
-        className="h-8 px-3 rounded-lg bg-card border border-card-border text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer"
+        className="h-8 px-2.5 rounded-lg bg-background border border-card-border text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-accent/50 cursor-pointer"
       >
         <option value="">Tous les CSM</option>
         {CSM_TEAM.map((csm) => (

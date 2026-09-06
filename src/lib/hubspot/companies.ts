@@ -11,6 +11,8 @@ function transformCompany(raw: HubSpotCompany): Company {
     domain: raw.properties.domain ?? null,
     mrr: parseNumber(raw.properties.total_revenue),
     plan: raw.properties.plan ?? null,
+    revenueTier: raw.properties.client_revenue_tiers ?? null,
+    country: raw.properties.code_pays_region ?? null,
     ownerId: csmOwner ?? raw.properties.hubspot_owner_id ?? null,
     lifecycleStage: raw.properties.lifecyclestage ?? null,
     customerStage: raw.properties.phase_du_client ?? null,
@@ -34,6 +36,7 @@ function transformCompany(raw: HubSpotCompany): Company {
     accompagnement: raw.properties.cs_accompagnement ?? null,
     reasonChurn: raw.properties.reason_churn ?? null,
     customerSituation: raw.properties.customers_situation ?? null,
+    upsellSignals: null, // populated via enrichment API, not from HubSpot
   }
 }
 

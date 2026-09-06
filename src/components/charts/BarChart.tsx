@@ -31,7 +31,7 @@ function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
 
   return (
-    <div className="bg-card border border-card-border rounded-lg px-3 py-2 shadow-xl">
+    <div className="bg-card border border-card-border rounded-lg px-3 py-2 shadow-lg">
       <p className="text-xs text-text-muted mb-1">{label}</p>
       {payload.map((entry: any) => (
         <div key={entry.name} className="flex items-center gap-2 text-xs">
@@ -56,15 +56,15 @@ export function BarChartComponent({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <RechartsBarChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#2A2A3C" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-card-border)" vertical={false} />
         <XAxis
           dataKey={xKey}
-          tick={{ fontSize: 11, fill: "#94A3B8" }}
-          axisLine={{ stroke: "#2A2A3C" }}
+          tick={{ fontSize: 11, fill: "var(--color-text-muted)" }}
+          axisLine={{ stroke: "var(--color-card-border)" }}
           tickLine={false}
         />
         <YAxis
-          tick={{ fontSize: 11, fill: "#94A3B8" }}
+          tick={{ fontSize: 11, fill: "var(--color-text-muted)" }}
           axisLine={false}
           tickLine={false}
           tickFormatter={(v) => formatCurrency(v, true)}

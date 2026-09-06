@@ -1,6 +1,6 @@
 import { hubspotSearch, hubspotFetch, type SearchFilterGroup } from "./client"
 import type { HubSpotDeal, Deal } from "../types"
-import { PIPELINES, DEAL_PROPERTIES, CSM_TEAM_IDS, ATTRIBUTION } from "../constants"
+import { PIPELINES, DEAL_PROPERTIES, CSM_TEAM_IDS, ATTRIBUTION, SALES_STAGES, CUSTOMER_LIFECYCLE } from "../constants"
 import { parseNumber, parseDate } from "../utils"
 import { format } from "date-fns"
 
@@ -15,7 +15,9 @@ function transformDeal(raw: HubSpotDeal): Deal {
     acv: parseNumber(raw.properties.hs_acv),
     attribution: raw.properties.attribution ?? null,
     renewalDate: parseDate(raw.properties.renewall_date),
+    renewalStrategy: raw.properties.renewall_strategy ?? null,
     operationDate: parseDate(raw.properties.date_de_prise_en_compte),
+    paymentDate: parseDate(raw.properties.date_de_paiement),
     closeDate: parseDate(raw.properties.closedate),
     stage: raw.properties.dealstage ?? "",
     pipeline: raw.properties.pipeline ?? "",
@@ -57,9 +59,6 @@ export async function fetchCustomerDeals(ownerId?: string): Promise<Deal[]> {
 }
 
 // Fetch deals by attribution (Upsell, Churn, Downsell) within a date range.
-// HubSpot Search API doesn't reliably support filtering on custom date properties
-// like date_de_prise_en_compte. Strategy: fetch by attribution using IN operator
-// (single filter group), then filter by date client-side.
 export async function fetchAttributionDeals(
   attributions: string[],
   dateFrom: string,
@@ -84,7 +83,7 @@ export async function fetchAttributionDeals(
 
   const deals = raw.map(transformDeal)
 
-  // Client-side date filtering on date_de_prise_en_compte
+  // Client-side date filtering
   return deals.filter((d) => {
     const opDate = d.operationDate ?? d.closeDate ?? d.createdAt
     if (!opDate) return false
@@ -103,9 +102,26 @@ export async function fetchCsmMovements(dateFrom: string, dateTo: string, ownerI
   )
 }
 
+// Fetch every deal in stage « Paiement reçu » (any attribution) — the source
+// of truth for MRR sous gestion: Σ signed amount per « Client » company.
+export async function fetchPaidDeals(): Promise<Deal[]> {
+  const filters: SearchFilterGroup[] = [
+    {
+      filters: [
+        { propertyName: "pipeline", operator: "EQ", value: PIPELINES.SALES },
+        { propertyName: "dealstage", operator: "EQ", value: SALES_STAGES.PAIEMENT_RECU },
+      ],
+    },
+  ]
+  const raw = await hubspotSearch<HubSpotDeal>("deals", {
+    filterGroups: filters,
+    properties: [...DEAL_PROPERTIES],
+    sorts: [{ propertyName: "hs_lastmodifieddate", direction: "DESCENDING" }],
+  }, "paid_deals_all")
+  return raw.map(transformDeal)
+}
+
 // Fetch deals with renewals in a date range.
-// renewall_date is a custom property — HubSpot Search API doesn't support
-// GTE/LTE on it. Strategy: fetch all deals with renewall_date set, filter client-side.
 export async function fetchRenewalDeals(dateFrom: string, dateTo: string, ownerId?: string): Promise<Deal[]> {
   const filters: SearchFilterGroup[] = [
     {
@@ -125,7 +141,6 @@ export async function fetchRenewalDeals(dateFrom: string, dateTo: string, ownerI
 
   const deals = raw.map(transformDeal)
 
-  // Client-side date filtering on renewall_date
   return deals
     .filter((d) => {
       if (!d.renewalDate) return false
@@ -161,7 +176,7 @@ export async function fetchNewDealsThisWeek(attribution: string): Promise<Deal[]
   return raw.map(transformDeal)
 }
 
-// Get company names for a list of deal IDs (via associations)
+// Get company names, tiers and countries for a list of deal IDs (via associations)
 export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
   if (deals.length === 0) return deals
 
@@ -171,52 +186,107 @@ export async function enrichDealsWithCompanies(deals: Deal[]): Promise<Deal[]> {
   for (let i = 0; i < dealIds.length; i += batchSize) {
     const batch = dealIds.slice(i, i + batchSize)
     try {
+      // v4 associations API returns ids as NUMBERS (from.id and toObjectId).
+      // Every downstream map (companyMeta, historyMap, dealsByCompany) is
+      // keyed by string ids from v3 endpoints — normalize with String() or
+      // no lookup ever matches and every deal silently loses its company.
       const response = await hubspotFetch<{
         results: Array<{
-          from: { id: string }
-          to: Array<{ toObjectId: string }>
+          from: { id: string | number }
+          to: Array<{
+            toObjectId: string | number
+            associationTypes?: Array<{ category: string; typeId: number; label: string | null }>
+          }>
         }>
       }>("/crm/v4/associations/deals/companies/batch/read", {
         method: "POST",
         body: { inputs: batch.map((id) => ({ id })) },
       })
 
+      // A deal is often associated with SEVERAL companies — typically the
+      // partner agency that sourced it AND the end customer. Keep every
+      // candidate; the pick happens once we know each company's lifecycle.
       const companyIds = new Set<string>()
-      const dealToCompany = new Map<string, string>()
+      const dealToCandidates = new Map<string, Array<{ id: string; primary: boolean }>>()
 
       for (const result of response.results) {
-        if (result.to?.[0]) {
-          dealToCompany.set(result.from.id, result.to[0].toObjectId)
-          companyIds.add(result.to[0].toObjectId)
-        }
+        const candidates = (result.to ?? []).map((t) => ({
+          id: String(t.toObjectId),
+          // HubSpot deal→company: typeId 5 = « Primary company »
+          primary: (t.associationTypes ?? []).some(
+            (a) => a.typeId === 5 || a.label?.toLowerCase() === "primary"
+          ),
+        }))
+        if (candidates.length === 0) continue
+        dealToCandidates.set(String(result.from.id), candidates)
+        for (const c of candidates) companyIds.add(c.id)
       }
 
       if (companyIds.size > 0) {
         const companiesResponse = await hubspotFetch<{
-          results: Array<{ id: string; properties: { name: string } }>
+          results: Array<{
+            id: string
+            properties: {
+              name: string
+              client_revenue_tiers?: string
+              code_pays_region?: string
+              lifecyclestage?: string
+            }
+          }>
         }>("/crm/v3/objects/companies/batch/read", {
           method: "POST",
           body: {
             inputs: Array.from(companyIds).map((id) => ({ id })),
-            properties: ["name"],
+            properties: ["name", "client_revenue_tiers", "code_pays_region", "lifecyclestage"],
           },
         })
 
         const companyNames = new Map<string, string>()
+        const companyTiers = new Map<string, string>()
+        const companyCountries = new Map<string, string>()
+        const companyLifecycle = new Map<string, string>()
         for (const company of companiesResponse.results) {
-          companyNames.set(company.id, company.properties.name)
+          const cid = String(company.id)
+          companyNames.set(cid, company.properties.name)
+          if (company.properties.client_revenue_tiers) {
+            companyTiers.set(cid, company.properties.client_revenue_tiers)
+          }
+          if (company.properties.code_pays_region) {
+            companyCountries.set(cid, company.properties.code_pays_region)
+          }
+          if (company.properties.lifecyclestage) {
+            companyLifecycle.set(cid, company.properties.lifecyclestage)
+          }
+        }
+
+        // Pick the company that carries the revenue:
+        //   1. a company in lifecycle « Client » (customer)
+        //   2. else the primary association
+        //   3. else the first association returned
+        const pickCompany = (cands: Array<{ id: string; primary: boolean }>): string => {
+          const customer = cands.find((c) => companyLifecycle.get(c.id) === CUSTOMER_LIFECYCLE)
+          if (customer) return customer.id
+          const primary = cands.find((c) => c.primary)
+          if (primary) return primary.id
+          return cands[0].id
         }
 
         for (const deal of deals) {
-          const companyId = dealToCompany.get(deal.id)
-          if (companyId) {
+          const cands = dealToCandidates.get(deal.id)
+          if (cands && cands.length > 0) {
+            const companyId = pickCompany(cands)
             deal.companyId = companyId
+            deal.companyIds = cands.map((c) => c.id)
             deal.companyName = companyNames.get(companyId) ?? undefined
+            deal.companyRevenueTier = companyTiers.get(companyId) ?? undefined
+            deal.companyCountry = companyCountries.get(companyId) ?? undefined
           }
         }
       }
-    } catch {
-      // Best effort — continue without company names
+    } catch (err) {
+      // Best effort — continue without company data, but never silently:
+      // a failed association read empties every tier/country breakdown.
+      console.error("enrichDealsWithCompanies: association batch failed", err)
     }
   }
 

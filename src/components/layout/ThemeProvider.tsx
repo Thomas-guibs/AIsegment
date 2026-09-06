@@ -8,7 +8,7 @@ const ThemeContext = createContext<{
   theme: Theme
   toggleTheme: () => void
 }>({
-  theme: "dark",
+  theme: "light",
   toggleTheme: () => {},
 })
 

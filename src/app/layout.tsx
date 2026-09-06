@@ -3,6 +3,8 @@ import { Suspense } from "react"
 import { Sidebar } from "@/components/layout/Sidebar"
 import { ThemeProvider } from "@/components/layout/ThemeProvider"
 import { Providers } from "@/components/layout/Providers"
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary"
+import { Toaster } from "sonner"
 import "./globals.css"
 
 export const metadata: Metadata = {
@@ -24,8 +26,21 @@ export default function RootLayout({
               <Suspense>
                 <Sidebar />
               </Suspense>
-              <main className="flex-1 overflow-y-auto">{children}</main>
+              <main className="flex-1 overflow-y-auto">
+                <ErrorBoundary>{children}</ErrorBoundary>
+              </main>
             </div>
+            <Toaster
+              position="bottom-right"
+              toastOptions={{
+                style: {
+                  background: "var(--color-card)",
+                  color: "var(--color-text-primary)",
+                  border: "1px solid var(--color-card-border)",
+                  fontSize: "13px",
+                },
+              }}
+            />
           </Providers>
         </ThemeProvider>
       </body>

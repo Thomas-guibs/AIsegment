@@ -58,15 +58,15 @@ export function LineChartComponent({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <RechartsLineChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#2A2A3C" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-card-border)" vertical={false} />
         <XAxis
           dataKey={xKey}
-          tick={{ fontSize: 11, fill: "#94A3B8" }}
+          tick={{ fontSize: 11, fill: "var(--color-text-muted)" }}
           axisLine={{ stroke: "#2A2A3C" }}
           tickLine={false}
         />
         <YAxis
-          tick={{ fontSize: 11, fill: "#94A3B8" }}
+          tick={{ fontSize: 11, fill: "var(--color-text-muted)" }}
           axisLine={false}
           tickLine={false}
           tickFormatter={(v) => (formatValue ? formatValue(v) : `${v}%`)}
